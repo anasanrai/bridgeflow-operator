@@ -36,6 +36,7 @@ from agents import (  # noqa: E402
 )
 from agents.base import extract_json, stream_agent  # noqa: E402
 from db import supabase_client  # noqa: E402
+from integrations import notify_hot_lead, send_immediate_emails  # noqa: E402
 from models.schemas import AnalyzeRequest  # noqa: E402
 
 app = FastAPI(title="BridgeFlow Operator", version="0.1.0")
@@ -144,8 +145,31 @@ async def pipeline_stream(transcript: str) -> AsyncIterator[str]:
                     parsed = out
             outputs[name] = parsed
             supabase_client.insert_analysis(call_id, name, parsed)
-            # small nudge so the client can paint between agents
             await asyncio.sleep(0)
+
+            # After Agent 4 produces the action manifest, execute the real
+            # integrations (Telegram alert + Resend emails) in parallel, then
+            # let Agent 5 reflect on the actual outcomes.
+            if name == "action_executor":
+                yield sse({"type": "integrations_start"})
+                tg_result, email_results = await asyncio.gather(
+                    notify_hot_lead(
+                        outputs["call_analyst"], outputs["lead_qualifier"]
+                    ),
+                    send_immediate_emails(
+                        outputs["action_executor"],
+                        outputs["call_analyst"],
+                        outputs["campaign_architect"],
+                    ),
+                )
+                yield sse(
+                    {
+                        "type": "integrations_complete",
+                        "telegram": tg_result,
+                        "emails": email_results,
+                        "actions": outputs["action_executor"],
+                    }
+                )
 
         supabase_client.insert_lead(
             call_id, outputs["call_analyst"], outputs["lead_qualifier"]
