@@ -1,7 +1,7 @@
 # BridgeFlow Operator
 
 Autonomous 5-agent sales pipeline powered by **Claude Opus 4.7**
-(`claude-opus-4-7-20251101`). Feed it a sales call transcript and it
+(`claude-opus-4-7`). Feed it a sales call transcript and it
 returns a fully qualified lead, a personalized follow-up sequence, a
 precise action manifest, and a self-reviewed rep briefing — end-to-end,
 streamed live.
