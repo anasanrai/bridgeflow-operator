@@ -1,0 +1,21 @@
+Agent: Hey Jake, thanks for jumping on a quick call. You mentioned on the form you're running a real estate team in Texas — tell me what's happening.
+
+Prospect: Hey Marcus, thanks for jumping on. Yeah so I run a team out of Frisco. I've got three agents and we're all sharing one CRM and nobody knows who's supposed to follow up. Last month I lost a deal — guy was ready to buy in Plano — just because nobody called him back for three days. That one was probably a $650,000 home.
+
+Agent: Ouch. How often is that happening?
+
+Prospect: I'd say we probably drop two maybe three leads a month just from slow follow-up. Which at our average price point is brutal.
+
+Agent: Have you tried anything to fix it?
+
+Prospect: We tried Follow Up Boss for a while but it still needed someone to actually do the follow-up. We need something that does the follow-up automatically, qualifies the lead, and tells us who to call first.
+
+Agent: That's exactly what we build. One question — what does something like this cost you if you don't fix it by end of quarter?
+
+Prospect: Honestly probably another $15k-$20k in lost commission. I'd be open to a pilot if it's not too expensive upfront.
+
+Agent: Let's do a proper working session — I'll show you exactly what we'd build for your team and you can decide if it's worth it. Thursday 2pm work?
+
+Prospect: Thursday 2pm works. My partner David would need to be in that conversation though — he signs off on anything over five grand. Email me at jake@frisco-realty.com and include him, david@frisco-realty.com.
+
+Agent: Perfect. Sending the calendar invite now. Talk Thursday.
