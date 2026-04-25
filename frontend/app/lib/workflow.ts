@@ -75,6 +75,8 @@ export interface ValidationResponse {
 // ── Section state machine ────────────────────────────────────────────────
 export type StepStatus = "idle" | "running" | "done" | "error";
 
+export const MAX_REFINEMENT_PASSES = 2;
+
 export interface WorkflowState {
   running: boolean;
   steps: {
@@ -82,12 +84,17 @@ export interface WorkflowState {
     workflow: StepStatus;
     credentials: StepStatus;
     validation: StepStatus;
+    refine: StepStatus;
   };
   playbook: Playbook | null;
   workflow: N8nWorkflow | null;
   credentials: CredentialsResponse | null;
   validation: ValidationResponse | null;
   error: string | null;
+  /** Number of refine passes Opus 4.7 has run on the workflow this session. */
+  refinementPasses: number;
+  /** Snapshot of validator issues that triggered the most recent refine pass. */
+  lastFixedIssues: ValidationIssue[];
 }
 
 const initialState: WorkflowState = {
@@ -97,12 +104,15 @@ const initialState: WorkflowState = {
     workflow: "idle",
     credentials: "idle",
     validation: "idle",
+    refine: "idle",
   },
   playbook: null,
   workflow: null,
   credentials: null,
   validation: null,
   error: null,
+  refinementPasses: 0,
+  lastFixedIssues: [],
 };
 
 async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -172,7 +182,7 @@ export function useWorkflowGenerator() {
       }));
 
       // 4. Validation
-      const validation = await postJson<ValidationResponse>(
+      let validation = await postJson<ValidationResponse>(
         "/api/validate-workflow",
         { workflow, call_id: callId },
         ctrl.signal
@@ -180,9 +190,78 @@ export function useWorkflowGenerator() {
       setState((s) => ({
         ...s,
         validation,
-        running: false,
         steps: { ...s.steps, validation: "done" },
       }));
+
+      // 5. Self-correcting loop — when validation surfaces blockers, feed
+      // the workflow + issues back to Opus 4.7 and retry. Cap at
+      // MAX_REFINEMENT_PASSES so we don't infinite-loop on a stubborn
+      // workflow.
+      let refinedWorkflow = workflow;
+      let pass = 0;
+      while (
+        validation.status === "missing_inputs" &&
+        pass < MAX_REFINEMENT_PASSES
+      ) {
+        pass += 1;
+        const blockerCount = validation.issues.filter((i) => i.severity === "blocker").length;
+        const fixedSnapshot = validation.issues;
+
+        setState((s) => ({
+          ...s,
+          steps: { ...s.steps, refine: "running", validation: "running" },
+          lastFixedIssues: fixedSnapshot,
+        }));
+
+        try {
+          refinedWorkflow = await postJson<N8nWorkflow>(
+            "/api/workflow-refine",
+            {
+              workflow: refinedWorkflow,
+              issues: fixedSnapshot,
+              call_id: callId,
+              pass_number: pass,
+            },
+            ctrl.signal
+          );
+        } catch (refineErr) {
+          // Refine failed — keep the previous workflow + validation, surface
+          // the error, but don't lose the rest of the result.
+          setState((s) => ({
+            ...s,
+            steps: { ...s.steps, refine: "error" },
+            error: `refine pass ${pass}: ${(refineErr as Error).message}`,
+          }));
+          break;
+        }
+
+        setState((s) => ({
+          ...s,
+          workflow: refinedWorkflow,
+          refinementPasses: pass,
+          steps: { ...s.steps, refine: "done" },
+        }));
+
+        // Re-validate the refined workflow.
+        validation = await postJson<ValidationResponse>(
+          "/api/validate-workflow",
+          { workflow: refinedWorkflow, call_id: callId },
+          ctrl.signal
+        );
+        setState((s) => ({
+          ...s,
+          validation,
+          steps: { ...s.steps, validation: "done" },
+        }));
+
+        // Surface what got fixed in console for debug visibility.
+        // eslint-disable-next-line no-console
+        console.info(
+          `[workflow] refine pass ${pass} applied to ${blockerCount} blocker(s); new status=${validation.status}`
+        );
+      }
+
+      setState((s) => ({ ...s, running: false }));
     } catch (err) {
       if ((err as any)?.name === "AbortError") return;
       setState((s) => {

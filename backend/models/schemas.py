@@ -35,6 +35,15 @@ class ValidateWorkflowRequest(BaseModel):
     call_id: str | None = None
 
 
+class WorkflowRefineRequest(BaseModel):
+    """V2 self-correcting loop: feed the previous workflow + validator issues
+    back to Opus 4.7 and get a corrected workflow JSON."""
+    workflow: dict[str, Any]
+    issues: list[dict[str, Any]] = Field(default_factory=list)
+    call_id: str | None = None
+    pass_number: int = 1  # 1-indexed; clamped server-side to 2 max
+
+
 class TestEmailRequest(BaseModel):
     to: str = Field(..., min_length=3)
     subject: str | None = None

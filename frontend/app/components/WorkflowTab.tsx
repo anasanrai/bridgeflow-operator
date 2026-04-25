@@ -41,6 +41,7 @@ import {
   N8nWorkflow,
   Playbook,
   StepStatus,
+  ValidationIssue,
   ValidationResponse,
   useWorkflowGenerator,
 } from "../lib/workflow";
@@ -59,6 +60,8 @@ export function WorkflowTab({ results, pipelineId }: Props) {
         running={wf.running}
         steps={wf.steps}
         validation={wf.validation}
+        refinementPasses={wf.refinementPasses}
+        lastFixedIssues={wf.lastFixedIssues}
         onGenerate={() => wf.generate(results, pipelineId ?? null)}
         onReset={wf.reset}
       />
@@ -95,12 +98,16 @@ function Header({
   running,
   steps,
   validation,
+  refinementPasses,
+  lastFixedIssues,
   onGenerate,
   onReset,
 }: {
   running: boolean;
   steps: Record<string, StepStatus>;
   validation: ValidationResponse | null;
+  refinementPasses: number;
+  lastFixedIssues: ValidationIssue[];
   onGenerate: () => void;
   onReset: () => void;
 }) {
@@ -109,9 +116,21 @@ function Header({
     { key: "workflow", label: "Workflow draft" },
     { key: "credentials", label: "Credentials" },
     { key: "validation", label: "Validation" },
+    { key: "refine", label: "Self-correct" },
   ];
   const allIdle = order.every((s) => steps[s.key] === "idle");
-  const allDone = order.every((s) => steps[s.key] === "done");
+  // "Done" if every step except refine is done, AND refine is either idle
+  // (no blockers, never needed) or done.
+  const allDone =
+    order
+      .filter((s) => s.key !== "refine")
+      .every((s) => steps[s.key] === "done") &&
+    (steps.refine === "idle" || steps.refine === "done");
+
+  const refining = steps.refine === "running";
+  const fixedBlockerCount = (lastFixedIssues || []).filter(
+    (i) => i.severity === "blocker"
+  ).length;
 
   return (
     <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.04] p-5">
@@ -129,11 +148,31 @@ function Header({
                 V2 · Building Now
               </span>
               {validation && <ValidationBadge validation={validation} />}
+              {refining && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-500/55 bg-amber-500/15 text-amber-100">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-blink" />
+                  Self-correcting · pass {refinementPasses + 1}/2
+                </span>
+              )}
+              {!refining && refinementPasses > 0 && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent/45 bg-accent/10 text-accent"
+                  title={
+                    fixedBlockerCount > 0
+                      ? `Opus 4.7 applied ${fixedBlockerCount} blocker fix${fixedBlockerCount === 1 ? "" : "es"} across ${refinementPasses} pass${refinementPasses === 1 ? "" : "es"}.`
+                      : "Workflow refined automatically."
+                  }
+                >
+                  <IconCheck className="w-3 h-3" />
+                  Self-corrected ×{refinementPasses}
+                </span>
+              )}
             </div>
             <p className="text-xs text-muted mt-0.5 max-w-2xl">
               Opus 4.7 turns this pipeline run into a structured playbook,
               production-ready n8n workflow JSON, credential checklist, and
-              an honest validation pass.
+              an honest validation pass — and re-prompts itself when the
+              validator surfaces blockers.
             </p>
           </div>
         </div>

@@ -32,6 +32,7 @@ from agents import (  # noqa: E402
     REFLECTION_SYSTEM,
     VALIDATION_SYSTEM,
     WORKFLOW_DRAFT_SYSTEM,
+    WORKFLOW_REFINE_SYSTEM,
     build_action_executor_user,
     build_call_analyst_user,
     build_campaign_architect_user,
@@ -41,6 +42,7 @@ from agents import (  # noqa: E402
     build_reflection_user,
     build_validation_user,
     build_workflow_draft_user,
+    build_workflow_refine_user,
     with_company_context,
 )
 from agents import (  # noqa: E402
@@ -74,6 +76,7 @@ from models.schemas import (  # noqa: E402
     TestEmailRequest,
     ValidateWorkflowRequest,
     WorkflowDraftRequest,
+    WorkflowRefineRequest,
 )
 
 app = FastAPI(title="BridgeFlow Operator", version="0.1.0")
@@ -701,6 +704,37 @@ async def workflow_draft(req: WorkflowDraftRequest) -> JSONResponse:
         # New row each time; keeps a draft history per call.
         supabase_client.insert_workflow_draft(
             req.call_id, req.playbook, out, None, None, platform="n8n"
+        )
+    return JSONResponse(out)
+
+
+@app.post("/workflow-refine")
+async def workflow_refine(req: WorkflowRefineRequest) -> JSONResponse:
+    """V2 self-correcting loop. Takes the previous workflow + validator
+    issues, returns a corrected workflow JSON that applies the suggested
+    fixes verbatim (no redesign). Capped at 2 passes server-side via the
+    pass_number field — calls beyond pass 2 are rejected so we don't
+    accidentally infinite-loop on a stubborn workflow."""
+    if req.pass_number > 2:
+        raise HTTPException(429, "max_refinement_passes_exceeded")
+    if not req.issues:
+        # Nothing to fix — return the workflow unchanged so the frontend
+        # can fall through cleanly.
+        return JSONResponse(req.workflow)
+    out = await _run_json_agent(
+        WORKFLOW_REFINE_SYSTEM,
+        build_workflow_refine_user(req.workflow, req.issues),
+        f"workflow_refine pass {req.pass_number}",
+        max_tokens=16384,
+    )
+    if req.call_id:
+        supabase_client.insert_workflow_draft(
+            req.call_id,
+            None,
+            out,
+            None,
+            None,
+            platform=f"n8n (refined pass {req.pass_number})",
         )
     return JSONResponse(out)
 
