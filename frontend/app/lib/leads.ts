@@ -8,6 +8,7 @@ export interface Lead {
   score: "hot" | "warm" | "cold" | string | null;
   decision: string | null;
   estimated_deal_value?: string | null;
+  status?: string | null;     // active | archived
   created_at: string;
 }
 

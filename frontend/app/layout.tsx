@@ -12,7 +12,19 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "BridgeFlow Operator",
-  description: "Autonomous 5-agent sales pipeline · Claude Opus 4.7",
+  description:
+    "Autonomous 5-agent sales pipeline · Built with Claude Opus 4.7 for the Built-with-4.7 hackathon.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    shortcut: ["/favicon.svg"],
+  },
+  openGraph: {
+    title: "BridgeFlow Operator",
+    description: "Drop a sales call. Five Opus 4.7 agents qualify, draft, fire, and self-review.",
+    url: "https://github.com/anasanrai/bridgeflow-operator",
+    siteName: "BridgeFlow Operator",
+    type: "website",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   IconBuilding,
+  IconClock,
   IconDashboard,
   IconKey,
   IconLeads,
@@ -22,8 +23,9 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { href: "/", label: "Pipeline", icon: IconPipeline, shortcut: "G P" },
+  { href: "/pipeline", label: "Pipeline", icon: IconPipeline, shortcut: "G P" },
   { href: "/leads", label: "Leads", icon: IconLeads, shortcut: "G L" },
+  { href: "/history", label: "History", icon: IconClock, shortcut: "G H" },
   { href: "/dashboard", label: "Dashboard", icon: IconDashboard, shortcut: "G D" },
 ];
 
@@ -148,20 +150,40 @@ export function Sidebar() {
             <span className="flex-1 text-left">Company</span>
             <CompletenessDot value={completeness} />
           </Link>
-          <button
-            type="button"
-            className="w-full group flex items-center gap-3 px-2.5 py-2 rounded-md text-sm text-ink-muted hover:text-ink hover:bg-white/[0.03] transition-colors cursor-pointer"
+          <Link
+            href="/settings/credentials"
+            className={`group flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-colors cursor-pointer ${
+              isActive(pathname, "/settings/credentials")
+                ? "bg-white/[0.04] text-ink"
+                : "text-ink-muted hover:text-ink hover:bg-white/[0.03]"
+            }`}
           >
-            <IconKey className="w-4 h-4 text-muted group-hover:text-ink" />
+            <IconKey
+              className={`w-4 h-4 transition-colors ${
+                isActive(pathname, "/settings/credentials")
+                  ? "text-accent"
+                  : "text-muted group-hover:text-ink"
+              }`}
+            />
             <span className="flex-1 text-left">Credentials</span>
-          </button>
-          <button
-            type="button"
-            className="w-full group flex items-center gap-3 px-2.5 py-2 rounded-md text-sm text-ink-muted hover:text-ink hover:bg-white/[0.03] transition-colors cursor-pointer"
+          </Link>
+          <Link
+            href="/settings/general"
+            className={`group flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-colors cursor-pointer ${
+              isActive(pathname, "/settings/general")
+                ? "bg-white/[0.04] text-ink"
+                : "text-ink-muted hover:text-ink hover:bg-white/[0.03]"
+            }`}
           >
-            <IconSettings className="w-4 h-4 text-muted group-hover:text-ink" />
+            <IconSettings
+              className={`w-4 h-4 transition-colors ${
+                isActive(pathname, "/settings/general")
+                  ? "text-accent"
+                  : "text-muted group-hover:text-ink"
+              }`}
+            />
             <span className="flex-1 text-left">Settings</span>
-          </button>
+          </Link>
         </nav>
 
         <CredentialStatus />

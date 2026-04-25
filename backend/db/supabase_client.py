@@ -250,6 +250,112 @@ def get_call_record(call_id: str) -> dict | None:
         return None
 
 
+# ── V2 QA: pipeline_runs / workflow_drafts / lead ops / action status ──
+
+def insert_pipeline_run(
+    call_id: str | None,
+    transcript: str,
+    call_analysis: dict,
+    qualification: dict,
+    *,
+    status: str = "complete",
+    approval_state: str = "none",
+) -> dict | None:
+    prospect = (call_analysis or {}).get("prospect") or {}
+    return _safe_insert(
+        "pipeline_runs",
+        {
+            "call_id": call_id,
+            "transcript_preview": (transcript or "")[:200],
+            "prospect_name": prospect.get("name"),
+            "company": prospect.get("company"),
+            "score": (qualification or {}).get("score"),
+            "decision": (qualification or {}).get("decision"),
+            "status": status,
+            "approval_state": approval_state,
+        },
+    )
+
+
+def list_pipeline_runs(limit: int = 100) -> list[dict]:
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        resp = (
+            client.table("pipeline_runs")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return getattr(resp, "data", None) or []
+    except Exception as exc:
+        print(f"[supabase] list_pipeline_runs failed: {exc}")
+        return []
+
+
+def insert_workflow_draft(
+    call_id: str | None,
+    playbook: dict | None,
+    workflow_json: dict | None,
+    credentials: dict | None,
+    validation: dict | None,
+    *,
+    platform: str = "n8n",
+) -> dict | None:
+    return _safe_insert(
+        "workflow_drafts",
+        {
+            "call_id": call_id,
+            "playbook": playbook,
+            "workflow_json": workflow_json,
+            "credentials": credentials,
+            "validation": validation,
+            "platform": platform,
+        },
+    )
+
+
+def update_lead(lead_id: str, fields: dict) -> dict | None:
+    """Patch a leads row. Whitelisted to columns that exist."""
+    client = get_client()
+    if client is None or not lead_id:
+        return None
+    allowed = {"name", "company", "email", "phone", "score", "decision", "status"}
+    payload = {k: v for k, v in (fields or {}).items() if k in allowed}
+    if not payload:
+        return None
+    try:
+        resp = (
+            client.table("leads")
+            .update(payload)
+            .eq("id", lead_id)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        print(f"[supabase] update_lead failed: {exc}")
+        return None
+
+
+def update_action_status(call_id: str, sequence: int | None, fields: dict) -> None:
+    """Patch the actions row for a given call+sequence. Used after Resend
+    actually sends / Telegram approval flips state."""
+    client = get_client()
+    if client is None or not call_id:
+        return
+    try:
+        q = client.table("actions").update(fields).eq("call_id", call_id)
+        if sequence is not None:
+            # action_data is jsonb; filter via Postgrest's ->> operator.
+            q = q.filter("action_data->>sequence", "eq", str(sequence))
+        q.execute()
+    except Exception as exc:
+        print(f"[supabase] update_action_status failed: {exc}")
+
+
 def get_analyses_for_call(call_id: str) -> list[dict]:
     client = get_client()
     if client is None or not call_id:

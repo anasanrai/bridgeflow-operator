@@ -12,7 +12,9 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import {
   IconCheck,
+  IconDownload,
   IconKey,
+  IconLock,
   IconPlay,
   IconRefresh,
   IconSparkle,
@@ -32,9 +34,10 @@ import {
 
 interface Props {
   results: PipelineResults;
+  pipelineId?: string | null;
 }
 
-export function WorkflowTab({ results }: Props) {
+export function WorkflowTab({ results, pipelineId }: Props) {
   const wf = useWorkflowGenerator();
 
   return (
@@ -43,7 +46,7 @@ export function WorkflowTab({ results }: Props) {
         running={wf.running}
         steps={wf.steps}
         validation={wf.validation}
-        onGenerate={() => wf.generate(results)}
+        onGenerate={() => wf.generate(results, pipelineId ?? null)}
         onReset={wf.reset}
       />
 
@@ -600,6 +603,7 @@ function WorkflowJsonCard({
   validationStatus: StepStatus;
 }) {
   const [copied, setCopied] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const json = useMemo(() => (workflow ? JSON.stringify(workflow, null, 2) : ""), [workflow]);
 
   const copyAll = async () => {
@@ -613,12 +617,33 @@ function WorkflowJsonCard({
     }
   };
 
+  const downloadJson = () => {
+    if (!json) return;
+    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const slug =
+      (workflow?.name || "workflow").replace(/[^a-z0-9-]+/gi, "-").toLowerCase() || "workflow";
+    a.href = url;
+    a.download = `bridgeflow-${slug}-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2400);
+  };
+
   return (
     <Card
       title="Workflow JSON"
       subtitle={
         workflow
-          ? "Paste this into n8n's import dialog."
+          ? "Paste this into n8n's import dialog, or download the file."
           : "Will populate after the draft step."
       }
       icon={<IconCheck className="w-4 h-4" />}
@@ -627,16 +652,41 @@ function WorkflowJsonCard({
       bodyClassName="p-0"
       headerExtra={
         workflow && (
-          <button
-            onClick={copyAll}
-            className={`text-[11px] font-mono px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
-              copied
-                ? "border-accent/40 bg-accent/10 text-accent"
-                : "border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
-            }`}
-          >
-            {copied ? "copied to clipboard" : "Copy to Clipboard"}
-          </button>
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            <button
+              onClick={() => showToast("Zapier export coming in V3")}
+              title="Available in V3"
+              className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded-md border border-border bg-bg text-faint hover:text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+            >
+              <IconLock className="w-3 h-3 text-amber-300/80" />
+              Export for Zapier <span className="text-amber-300/80">(V3)</span>
+            </button>
+            <button
+              onClick={() => showToast("Make export coming in V3")}
+              title="Available in V3"
+              className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded-md border border-border bg-bg text-faint hover:text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+            >
+              <IconLock className="w-3 h-3 text-amber-300/80" />
+              Export for Make <span className="text-amber-300/80">(V3)</span>
+            </button>
+            <button
+              onClick={downloadJson}
+              className="inline-flex items-center gap-1 text-[11px] font-mono px-2.5 py-1 rounded-md border border-border bg-bg text-ink-muted hover:text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+            >
+              <IconDownload className="w-3 h-3" />
+              Download JSON
+            </button>
+            <button
+              onClick={copyAll}
+              className={`text-[11px] font-mono px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
+                copied
+                  ? "border-accent/40 bg-accent/10 text-accent"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
+              }`}
+            >
+              {copied ? "copied to clipboard" : "Copy to Clipboard"}
+            </button>
+          </div>
         )
       }
     >
@@ -649,6 +699,11 @@ function WorkflowJsonCard({
           <pre className="text-[11px] leading-relaxed font-mono text-ink-muted bg-bg/40 border-t border-border p-4 max-h-[420px] overflow-auto scrollbar-thin">
             <Highlight code={json} />
           </pre>
+          {toast && (
+            <div className="fixed bottom-6 right-6 z-50 rounded-md border border-amber-500/45 bg-bg/95 backdrop-blur text-amber-200 text-[12px] font-mono px-3 py-2 shadow-glow-accent animate-fade-in-up">
+              {toast}
+            </div>
+          )}
         </>
       )}
     </Card>

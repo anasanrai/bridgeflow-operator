@@ -1,248 +1,299 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { ActionManifest } from "./components/ActionManifest";
-import { AgentStream } from "./components/AgentStream";
-import { AudioUpload } from "./components/AudioUpload";
-import { ConsultantChat } from "./components/ConsultantChat";
-import { LeadReport } from "./components/LeadReport";
-import { TranscriptUpload } from "./components/TranscriptUpload";
-import { WorkflowTab } from "./components/WorkflowTab";
+import Link from "next/link";
 import {
-  IconMic,
+  IconChevron,
+  IconLogo,
   IconPipeline,
   IconSparkle,
   IconTarget,
 } from "./lib/icons";
-import { useAgentStream } from "./lib/useAgentStream";
 
-type Mode = "transcript" | "voice" | "workflow";
+export const metadata = {
+  title: "BridgeFlow Operator · Built with Opus 4.7",
+  description:
+    "Drop a sales call. Five Claude Opus 4.7 agents qualify the lead, draft the campaign, fire Telegram + Resend, and self-review.",
+};
 
-function leadScore(results: ReturnType<typeof useAgentStream>["results"]): string {
-  const raw = (results?.qualification as any)?.score;
-  return typeof raw === "string" ? raw.toUpperCase() : "";
-}
+const HACKATHON_URL = "https://cerebralvalley.ai/e/built-with-4-7-hackathon";
+const REPO_URL = "https://github.com/anasanrai/bridgeflow-operator";
 
-export default function PipelinePage() {
-  const pipeline = useAgentStream();
-  const [mode, setMode] = useState<Mode>("transcript");
-
-  const score = leadScore(pipeline.results);
-  const workflowEligible = score === "HOT" || score === "WARM";
-
-  // When a pipeline run finishes with HOT/WARM, surface the V2 tab.
-  useEffect(() => {
-    if (pipeline.results && workflowEligible) setMode("workflow");
-  }, [pipeline.results, workflowEligible]);
-
-  // If the user resets and the workflow tab is no longer valid, fall back.
-  useEffect(() => {
-    if (mode === "workflow" && !pipeline.results) setMode("transcript");
-  }, [mode, pipeline.results]);
-
+export default function LandingPage() {
   return (
-    <div className="space-y-6">
-      <PageHeader running={pipeline.running} callId={pipeline.callId} />
+    <div className="relative -mx-4 -my-6 px-4 py-8 lg:px-10 lg:py-14 overflow-hidden">
+      <BackdropGlow />
 
-      <ModeTabs
-        mode={mode}
-        setMode={setMode}
-        disabled={pipeline.running}
-        workflowEligible={workflowEligible}
-      />
+      <div className="relative max-w-5xl mx-auto">
+        <Hackathon />
 
-      {mode === "workflow" && pipeline.results ? (
-        <WorkflowTab results={pipeline.results} />
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          <section className="lg:col-span-2 space-y-4">
-            {mode === "voice" ? (
-              <AudioUpload
-                running={pipeline.running}
-                onTranscribed={(text) => pipeline.run(text)}
-                onReset={pipeline.reset}
-              />
-            ) : (
-              <TranscriptUpload
-                running={pipeline.running}
-                onRun={pipeline.run}
-                onReset={pipeline.reset}
-              />
-            )}
+        <h1 className="mt-7 text-[40px] sm:text-[56px] lg:text-[72px] leading-[0.98] font-semibold tracking-tight text-ink">
+          Drop a sales call.
+          <br />
+          <span className="text-accent">Five Opus 4.7 agents</span> handle the rest.
+        </h1>
 
-            {pipeline.error && (
-              <div className="rounded-xl border border-hot/40 bg-hot/5 p-4 text-sm text-hot">
-                {pipeline.error}
-              </div>
-            )}
+        <p className="mt-5 max-w-2xl text-[15px] leading-relaxed text-ink-muted">
+          BridgeFlow Operator is an autonomous 5-agent sales floor. Paste a transcript or drop a call recording — Claude Opus 4.7 qualifies the lead, drafts a personalised campaign, fires Telegram + Resend, and self-reviews. Built in late nights for the{" "}
+          <a href={HACKATHON_URL} className="text-accent underline decoration-accent/40 hover:decoration-accent">
+            Built-with-4.7 hackathon
+          </a>
+          .
+        </p>
 
-            <AgentStream agents={pipeline.agents} running={pipeline.running} />
-          </section>
-
-          <section className="lg:col-span-3 space-y-4">
-            {!pipeline.results && !pipeline.running && (
-              <EmptyState mode={mode === "workflow" ? "transcript" : mode} />
-            )}
-            {pipeline.running && !pipeline.results && <RunningState />}
-            {pipeline.results && (
-              <>
-                <LeadReport results={pipeline.results} />
-                <ActionManifest results={pipeline.results} />
-                <ConsultantChat
-                  pipelineId={pipeline.callId}
-                  results={pipeline.results}
-                />
-              </>
-            )}
-          </section>
+        <div className="mt-8 flex flex-wrap items-center gap-3">
+          <Link
+            href="/pipeline"
+            className="group inline-flex items-center gap-2 px-5 py-3 rounded-lg bg-accent text-bg font-semibold text-sm shadow-glow-accent hover:bg-accent/90 transition-colors cursor-pointer"
+          >
+            Open App
+            <IconChevron className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+          </Link>
+          <a
+            href={REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-lg border border-border bg-surface text-ink hover:bg-surface-2 font-medium text-sm transition-colors cursor-pointer"
+          >
+            <IconLogo className="w-4 h-4 text-accent" />
+            View on GitHub
+          </a>
+          <a
+            href={HACKATHON_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-lg border border-border bg-surface text-ink-muted hover:text-ink hover:bg-surface-2 font-medium text-sm transition-colors cursor-pointer"
+          >
+            <IconSparkle className="w-4 h-4 text-accent" />
+            Submit / View Hackathon
+          </a>
         </div>
-      )}
+
+        <PipelinePoster />
+
+        <SpecGrid />
+
+        <Footer />
+      </div>
     </div>
   );
 }
 
-function ModeTabs({
-  mode,
-  setMode,
-  disabled,
-  workflowEligible,
-}: {
-  mode: Mode;
-  setMode: (m: Mode) => void;
-  disabled: boolean;
-  workflowEligible: boolean;
-}) {
-  const tabs: Array<{
-    id: Mode;
-    label: string;
-    icon: typeof IconPipeline;
-    accent?: "amber";
-    badge?: string;
-    available: boolean;
+// ── Hackathon badge ─────────────────────────────────────────────────────
+
+function Hackathon() {
+  return (
+    <a
+      href={HACKATHON_URL}
+      target="_blank"
+      rel="noreferrer"
+      className="group inline-flex items-center gap-2 rounded-full border border-accent/35 bg-accent/[0.07] px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider text-accent hover:bg-accent/10 transition-colors"
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent animate-blink" />
+      Built with Opus 4.7 · A Claude Code hackathon
+      <IconChevron className="w-3 h-3 opacity-60 group-hover:translate-x-0.5 transition-transform" />
+    </a>
+  );
+}
+
+// ── Pipeline poster (5-agent visual under the hero) ─────────────────────
+
+function PipelinePoster() {
+  const agents = [
+    { n: "Agent 1", t: "Call Analyst", s: "intent · budget · objections" },
+    { n: "Agent 2", t: "Lead Qualifier", s: "HOT / WARM / COLD" },
+    { n: "Agent 3", t: "Campaign Architect", s: "3-touch follow-up" },
+    { n: "Agent 4", t: "Action Executor", s: "manifest + integrations" },
+    { n: "Agent 5", t: "Reflection", s: "QA + rep briefing" },
+  ];
+  return (
+    <section className="mt-14 relative">
+      <div className="text-[10px] font-mono uppercase tracking-wider text-faint">
+        The pipeline
+      </div>
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-5 gap-3">
+        {agents.map((a, i) => (
+          <div
+            key={a.n}
+            className="relative rounded-xl border border-border bg-surface p-4 overflow-hidden"
+          >
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/40 to-transparent" />
+            <div className="text-[10px] font-mono uppercase tracking-wider text-accent/80">
+              {a.n}
+            </div>
+            <div className="mt-1 text-sm font-semibold text-ink">{a.t}</div>
+            <div className="mt-1 text-[11px] text-muted leading-relaxed">{a.s}</div>
+            <div className="absolute bottom-2 right-2 text-[10px] font-mono text-faint">
+              {String(i + 1).padStart(2, "0")}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex items-center gap-3 text-[11px] font-mono text-faint">
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent" />
+          single model
+        </span>
+        <span>·</span>
+        <span>claude-opus-4-7</span>
+        <span>·</span>
+        <span>streaming SSE</span>
+        <span>·</span>
+        <span>real Resend / Telegram fires</span>
+      </div>
+    </section>
+  );
+}
+
+// ── V1 / V2 / V3 / V4 spec grid ─────────────────────────────────────────
+
+function SpecGrid() {
+  const items: Array<{
+    version: string;
+    state: "live" | "building" | "coming" | "roadmap";
+    title: string;
+    bullets: string[];
   }> = [
-    { id: "transcript", label: "Transcript", icon: IconPipeline, available: true },
-    { id: "voice", label: "Call Recording", icon: IconMic, available: true },
     {
-      id: "workflow",
-      label: "V2 Workflow",
-      icon: IconSparkle,
-      accent: "amber",
-      badge: "Building Now",
-      available: workflowEligible,
+      version: "V1",
+      state: "live",
+      title: "Transcript → Intelligence",
+      bullets: [
+        "Call recording or transcript input",
+        "5 Opus 4.7 agents with live SSE",
+        "Personalised emails + CRM note",
+        "Telegram alert + Supabase persistence",
+      ],
+    },
+    {
+      version: "V2",
+      state: "building",
+      title: "Intelligence → Action",
+      bullets: [
+        "Company identity vault (agents speak as you)",
+        "In-dashboard AI consultant",
+        "n8n workflow generator + validation",
+        "Telegram APPROVE / EDIT / SKIP gating",
+      ],
+    },
+    {
+      version: "V3",
+      state: "coming",
+      title: "Real Call Center",
+      bullets: [
+        "Inbound + outbound voice agents",
+        "Every call auto-feeds the 5-agent pipeline",
+        "CRM connectors (HubSpot / FUB / Salesforce)",
+        "Slack approvals + lead memory",
+      ],
+    },
+    {
+      version: "V4",
+      state: "roadmap",
+      title: "Autonomous Agency",
+      bullets: [
+        "Per-department Opus 4.7 agents",
+        "MCP-secured credential vault",
+        "5/95 human-to-agent ratio",
+        "Full observability + experiments",
+      ],
     },
   ];
 
+  const meta = {
+    live: { tag: "LIVE", cls: "border-accent/40 text-accent bg-accent/10", glow: "ring-1 ring-accent/30" },
+    building: {
+      tag: "BUILDING NOW",
+      cls: "border-amber-500/45 text-amber-200 bg-amber-500/10",
+      glow: "ring-1 ring-amber-500/25",
+    },
+    coming: { tag: "COMING", cls: "border-border text-muted bg-surface", glow: "" },
+    roadmap: { tag: "ROADMAP", cls: "border-border text-faint bg-surface", glow: "" },
+  } as const;
+
   return (
-    <div role="tablist" className="inline-flex items-center gap-1 p-1 rounded-lg border border-border bg-surface">
-      {tabs.map((t) => {
-        const active = mode === t.id;
-        const Icon = t.icon;
-        const isAmber = t.accent === "amber";
-        const tabDisabled = disabled || !t.available;
-        return (
-          <button
-            key={t.id}
-            role="tab"
-            aria-selected={active}
-            disabled={tabDisabled}
-            onClick={() => setMode(t.id)}
-            title={!t.available ? "Available after a HOT or WARM pipeline run" : undefined}
-            className={`relative inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
-              active
-                ? isAmber
-                  ? "bg-amber-500/10 text-amber-200 border border-amber-500/40"
-                  : "bg-bg text-ink border border-border"
-                : "text-muted hover:text-ink border border-transparent"
-            }`}
-          >
-            <Icon className="w-3.5 h-3.5" />
-            {t.label}
-            {t.badge && (
-              <span
-                className={`text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${
-                  active
-                    ? "border-amber-500/50 text-amber-200 bg-amber-500/15"
-                    : "border-amber-500/40 text-amber-300/90 bg-amber-500/10"
-                }`}
-              >
-                {t.badge}
-              </span>
-            )}
-          </button>
-        );
-      })}
-    </div>
+    <section className="mt-14">
+      <div className="text-[10px] font-mono uppercase tracking-wider text-faint">
+        The roadmap
+      </div>
+      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        {items.map((it) => {
+          const m = meta[it.state];
+          return (
+            <article
+              key={it.version}
+              className={`relative rounded-xl border border-border bg-surface p-4 ${m.glow}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-mono font-semibold text-ink tracking-wide">
+                  {it.version}
+                </span>
+                <span
+                  className={`inline-flex items-center text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${m.cls}`}
+                >
+                  {m.tag}
+                </span>
+              </div>
+              <h3 className="mt-2 text-sm font-semibold text-ink">{it.title}</h3>
+              <ul className="mt-3 space-y-1.5 text-[11px] text-ink-muted leading-relaxed">
+                {it.bullets.map((b) => (
+                  <li key={b} className="flex items-start gap-2">
+                    <span className="mt-1.5 w-1 h-1 rounded-full bg-accent/50 shrink-0" />
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
-function PageHeader({ running, callId }: { running: boolean; callId: string | null }) {
+function Footer() {
   return (
-    <div className="flex items-end justify-between gap-4 flex-wrap">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Pipeline</h1>
-        <p className="text-sm text-muted mt-1">
-          5 autonomous agents · streaming reasoning · persisted leads &amp; actions.
-        </p>
-      </div>
-      <div className="flex items-center gap-2 text-[11px] font-mono">
-        <span
-          className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border ${
-            running
-              ? "text-accent border-accent/40 bg-accent/5"
-              : "text-muted border-border bg-surface"
-          }`}
+    <footer className="mt-16 pt-6 border-t border-border flex flex-wrap items-center justify-between gap-3 text-[11px] font-mono text-faint">
+      <span className="flex items-center gap-2">
+        <IconTarget className="w-3 h-3 text-accent" />
+        bridgeflow-operator
+      </span>
+      <span className="flex items-center gap-3">
+        <a
+          href={REPO_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="hover:text-ink transition-colors"
         >
-          <span
-            className={`w-1.5 h-1.5 rounded-full ${
-              running ? "bg-accent animate-blink" : "bg-muted/60"
-            }`}
-          />
-          {running ? "streaming" : "ready"}
-        </span>
-        {callId && (
-          <span className="px-2 py-1 rounded-md border border-border bg-surface text-muted">
-            call {callId.slice(0, 8)}
-          </span>
-        )}
-      </div>
+          github
+        </a>
+        <span>·</span>
+        <a
+          href={HACKATHON_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="hover:text-ink transition-colors"
+        >
+          hackathon
+        </a>
+        <span>·</span>
+        <Link href="/pipeline" className="text-accent hover:underline">
+          launch app →
+        </Link>
+      </span>
+    </footer>
+  );
+}
+
+// ── Decorative backdrop ────────────────────────────────────────────────
+
+function BackdropGlow() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="absolute -top-40 -left-32 w-[420px] h-[420px] rounded-full bg-accent/10 blur-3xl" />
+      <div className="absolute top-40 right-0 w-[320px] h-[320px] rounded-full bg-amber-500/[0.07] blur-3xl" />
+      <div className="absolute inset-0 bg-dot opacity-60" />
     </div>
   );
 }
 
-function EmptyState({ mode }: { mode: Mode }) {
-  const isVoice = mode === "voice";
-  return (
-    <div className="rounded-xl border border-border bg-surface shadow-inset-hair p-10 text-center">
-      <div
-        className={`w-12 h-12 mx-auto rounded-xl flex items-center justify-center mb-4 ${
-          isVoice
-            ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
-            : "bg-accent/10 border border-accent/30 text-accent shadow-glow-accent"
-        }`}
-      >
-        {isVoice ? <IconMic className="w-6 h-6" /> : <IconTarget className="w-6 h-6" />}
-      </div>
-      <div className="text-sm font-semibold text-ink">No pipeline run yet</div>
-      <div className="text-xs text-muted mt-2 max-w-md mx-auto leading-relaxed">
-        {isVoice
-          ? "Drop an audio file on the left. We'll transcribe it with Groq Whisper and auto-run all five Opus 4.7 agents."
-          : "Paste a sales call transcript or load the demo, then run the pipeline. Five Opus 4.7 agents will qualify the lead, draft a follow-up sequence, plan the actions, and self-review."}
-      </div>
-    </div>
-  );
-}
-
-function RunningState() {
-  return (
-    <div className="rounded-xl border border-border bg-surface shadow-inset-hair p-10 text-center">
-      <div className="w-12 h-12 mx-auto rounded-xl bg-accent/10 border border-accent/30 text-accent flex items-center justify-center mb-4 shadow-glow-accent">
-        <IconSparkle className="w-6 h-6 animate-blink" />
-      </div>
-      <div className="text-sm font-semibold text-ink">Pipeline running</div>
-      <div className="text-xs text-muted mt-2">
-        Watch the agents think in real time on the left. The final report
-        renders here as each stage completes.
-      </div>
-    </div>
-  );
-}
+// avoid unused-import lint warning when ts-prune scans
+void IconPipeline;

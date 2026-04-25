@@ -16,19 +16,29 @@ class PlaybookRequest(BaseModel):
     """Pipeline result from /analyze (call_analysis, qualification, campaign,
     actions, reflection)."""
     pipeline: dict[str, Any] = Field(..., description="Full PipelineResults object")
+    call_id: str | None = None
 
 
 class WorkflowDraftRequest(BaseModel):
     playbook: dict[str, Any]
     pipeline: dict[str, Any] | None = None
+    call_id: str | None = None
 
 
 class CredentialsRequest(BaseModel):
     workflow: dict[str, Any]
+    call_id: str | None = None
 
 
 class ValidateWorkflowRequest(BaseModel):
     workflow: dict[str, Any]
+    call_id: str | None = None
+
+
+class TestEmailRequest(BaseModel):
+    to: str = Field(..., min_length=3)
+    subject: str | None = None
+    content: str | None = None
 
 
 # ── V2 Company identity vault ───────────────────────────────────────────

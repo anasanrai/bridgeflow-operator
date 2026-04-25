@@ -129,7 +129,7 @@ export function useWorkflowGenerator() {
   const [state, setState] = useState<WorkflowState>(initialState);
   const reset = useCallback(() => setState(initialState), []);
 
-  const generate = useCallback(async (results: PipelineResults) => {
+  const generate = useCallback(async (results: PipelineResults, callId?: string | null) => {
     const ctrl = new AbortController();
     setState({ ...initialState, running: true });
 
@@ -138,7 +138,7 @@ export function useWorkflowGenerator() {
       setState((s) => ({ ...s, steps: { ...s.steps, playbook: "running" } }));
       const playbook = await postJson<Playbook>(
         "/api/playbook",
-        { pipeline: results },
+        { pipeline: results, call_id: callId },
         ctrl.signal
       );
       setState((s) => ({
@@ -150,7 +150,7 @@ export function useWorkflowGenerator() {
       // 2. Workflow draft
       const workflow = await postJson<N8nWorkflow>(
         "/api/workflow-draft",
-        { playbook, pipeline: results },
+        { playbook, pipeline: results, call_id: callId },
         ctrl.signal
       );
       setState((s) => ({
@@ -162,7 +162,7 @@ export function useWorkflowGenerator() {
       // 3. Credentials
       const credentials = await postJson<CredentialsResponse>(
         "/api/credentials",
-        { workflow },
+        { workflow, call_id: callId },
         ctrl.signal
       );
       setState((s) => ({
@@ -174,7 +174,7 @@ export function useWorkflowGenerator() {
       // 4. Validation
       const validation = await postJson<ValidationResponse>(
         "/api/validate-workflow",
-        { workflow },
+        { workflow, call_id: callId },
         ctrl.signal
       );
       setState((s) => ({

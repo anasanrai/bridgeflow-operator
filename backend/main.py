@@ -69,6 +69,7 @@ from models.schemas import (  # noqa: E402
     ConsultantRequest,
     CredentialsRequest,
     PlaybookRequest,
+    TestEmailRequest,
     ValidateWorkflowRequest,
     WorkflowDraftRequest,
 )
@@ -256,6 +257,18 @@ async def pipeline_stream(transcript: str) -> AsyncIterator[str]:
         )
         supabase_client.insert_actions(call_id, outputs["action_executor"])
         supabase_client.update_call_status(call_id or "", "complete")
+
+        # V2 QA: persist a pipeline_runs row so /history and the dashboard can
+        # show real history without re-joining 4 tables. approval_state is
+        # populated below if we held emails.
+        supabase_client.insert_pipeline_run(
+            call_id,
+            transcript,
+            outputs["call_analyst"],
+            outputs["lead_qualifier"],
+            status="complete",
+            approval_state="pending" if held_emails_for_approval else "none",
+        )
 
         # If we held emails earlier, send the approval prompt to Telegram now
         # (after Agent 5) and persist a pending_approvals row per held email.
@@ -504,6 +517,12 @@ async def telegram_webhook(request: Request) -> JSONResponse:
         supabase_client.update_pending_approval(
             approval_id, status="skipped", approved_at=None
         )
+        # Reflect in the actions table so the manifest UI flips ⏳ → ⏭ skipped.
+        supabase_client.update_action_status(
+            pending.get("call_id"),
+            payload.get("sequence"),
+            {"status": "skipped"},
+        )
         await send_telegram_text(
             f"⏭️ Skipped. Email to {payload.get('to') or 'recipient'} archived."
         )
@@ -530,6 +549,11 @@ async def telegram_webhook(request: Request) -> JSONResponse:
             status="approved",
             email_payload={**payload, "sent_message_id": result.get("id")},
         )
+        supabase_client.update_action_status(
+            pending.get("call_id"),
+            payload.get("sequence"),
+            {"status": "sent"},
+        )
         await send_telegram_text(
             f"✅ Sent to {payload.get('to')}. Resend id: {result.get('id')}"
         )
@@ -537,12 +561,17 @@ async def telegram_webhook(request: Request) -> JSONResponse:
             {"ok": True, "action": "approved", "resend_id": result.get("id")}
         )
     error = result.get("error") or result.get("skipped_reason") or "unknown"
+    supabase_client.update_action_status(
+        pending.get("call_id"),
+        payload.get("sequence"),
+        {"status": "failed"},
+    )
     await send_telegram_text(f"❌ Send failed: {error}")
     return JSONResponse({"ok": True, "action": "approve_failed", "error": error})
 
 
 @app.get("/leads")
-async def leads(limit: int = 100) -> dict:
+async def leads(limit: int = 100, include_archived: bool = False) -> dict:
     """Latest leads, enriched with the call analyst snapshot and decision.
     Returns an empty list (and `source: 'demo'`) when Supabase is not configured —
     the frontend falls back to seeded demo data in that case."""
@@ -550,13 +579,16 @@ async def leads(limit: int = 100) -> dict:
     if client is None:
         return {"source": "demo", "leads": []}
     try:
-        resp = (
+        q = (
             client.table("leads")
-            .select("id,call_id,name,company,email,phone,score,decision,created_at")
+            .select("id,call_id,name,company,email,phone,score,decision,status,created_at")
             .order("created_at", desc=True)
             .limit(limit)
-            .execute()
         )
+        # Default view excludes archived rows; ?archived=1 to include them.
+        if not include_archived:
+            q = q.or_("status.is.null,status.neq.archived")
+        resp = q.execute()
         rows = getattr(resp, "data", None) or []
         return {"source": "supabase", "leads": rows}
     except Exception as exc:
@@ -585,6 +617,10 @@ async def playbook(req: PlaybookRequest) -> JSONResponse:
     out = await _run_json_agent(
         PLAYBOOK_SYSTEM, build_playbook_user(req.pipeline), "playbook"
     )
+    if req.call_id:
+        supabase_client.insert_workflow_draft(
+            req.call_id, out, None, None, None, platform="n8n"
+        )
     return JSONResponse(out)
 
 
@@ -597,6 +633,11 @@ async def workflow_draft(req: WorkflowDraftRequest) -> JSONResponse:
         "workflow_draft",
         max_tokens=16384,  # full n8n workflows are 8-12K JSON tokens
     )
+    if req.call_id:
+        # New row each time; keeps a draft history per call.
+        supabase_client.insert_workflow_draft(
+            req.call_id, req.playbook, out, None, None, platform="n8n"
+        )
     return JSONResponse(out)
 
 
@@ -606,6 +647,10 @@ async def credentials(req: CredentialsRequest) -> JSONResponse:
     out = await _run_json_agent(
         CREDENTIALS_SYSTEM, build_credentials_user(req.workflow), "credentials"
     )
+    if req.call_id:
+        supabase_client.insert_workflow_draft(
+            req.call_id, None, req.workflow, out, None, platform="n8n"
+        )
     return JSONResponse(out)
 
 
@@ -615,7 +660,51 @@ async def validate_workflow(req: ValidateWorkflowRequest) -> JSONResponse:
     out = await _run_json_agent(
         VALIDATION_SYSTEM, build_validation_user(req.workflow), "validation"
     )
+    if req.call_id:
+        supabase_client.insert_workflow_draft(
+            req.call_id, None, req.workflow, None, out, platform="n8n"
+        )
     return JSONResponse(out)
+
+
+@app.post("/test-email")
+async def test_email(req: TestEmailRequest) -> JSONResponse:
+    """Credentials page → 'Send test email'. Uses send_single_email so the
+    operator can verify Resend before a real run."""
+    payload = {
+        "to": req.to,
+        "subject": req.subject or "BridgeFlow Operator — Resend test",
+        "content": req.content
+        or "If you got this, your Resend integration is wired up correctly.\n\n— BridgeFlow Operator",
+    }
+    result = await send_single_email(payload)
+    if result.get("sent"):
+        return JSONResponse({"sent": True, "id": result.get("id"), "to": req.to})
+    raise HTTPException(502, f"resend: {result.get('error') or result.get('skipped_reason')}")
+
+
+@app.get("/history")
+async def history(limit: int = 100) -> JSONResponse:
+    """V2 QA: pipeline_runs table for the History page."""
+    rows = supabase_client.list_pipeline_runs(limit=limit)
+    return JSONResponse({"runs": rows, "source": "supabase" if rows else "demo"})
+
+
+@app.patch("/leads/{lead_id}")
+async def patch_lead(lead_id: str, payload: dict) -> JSONResponse:
+    saved = supabase_client.update_lead(lead_id, payload or {})
+    if saved is None:
+        raise HTTPException(404, "lead_not_found_or_unchanged")
+    return JSONResponse({"lead": saved})
+
+
+@app.delete("/leads/{lead_id}")
+async def archive_lead(lead_id: str) -> JSONResponse:
+    """Soft delete: status='archived'."""
+    saved = supabase_client.update_lead(lead_id, {"status": "archived"})
+    if saved is None:
+        raise HTTPException(404, "lead_not_found")
+    return JSONResponse({"lead": saved, "archived": True})
 
 
 @app.post("/transcribe")
