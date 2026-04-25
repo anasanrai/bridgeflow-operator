@@ -72,6 +72,7 @@ from models.schemas import (  # noqa: E402
     CompanyProfile,
     ConsultantRequest,
     CredentialsRequest,
+    EditApprovalRequest,
     PlaybookRequest,
     TestEmailRequest,
     ValidateWorkflowRequest,
@@ -803,6 +804,59 @@ async def archive_lead(lead_id: str) -> JSONResponse:
     if saved is None:
         raise HTTPException(404, "lead_not_found")
     return JSONResponse({"lead": saved, "archived": True})
+
+
+# ── V2 dashboard approvals — same flow as Telegram, just from the UI ────
+
+
+@app.get("/approvals")
+async def list_approvals(status: str = "pending", limit: int = 50) -> JSONResponse:
+    rows = supabase_client.list_pending_approvals(
+        status=status if status else None, limit=limit
+    )
+    return JSONResponse({"approvals": rows, "count": len(rows)})
+
+
+@app.post("/approvals/{approval_id}/approve")
+async def approve_approval(approval_id: str) -> JSONResponse:
+    pending = supabase_client.get_pending_approval(approval_id)
+    if pending is None:
+        raise HTTPException(404, "approval_not_found")
+    if pending.get("status") != "pending":
+        raise HTTPException(409, f"already_{pending.get('status')}")
+    result = await _resolve_approval(pending, "approve", source="dashboard")
+    return JSONResponse(result)
+
+
+@app.post("/approvals/{approval_id}/skip")
+async def skip_approval(approval_id: str) -> JSONResponse:
+    pending = supabase_client.get_pending_approval(approval_id)
+    if pending is None:
+        raise HTTPException(404, "approval_not_found")
+    if pending.get("status") != "pending":
+        raise HTTPException(409, f"already_{pending.get('status')}")
+    result = await _resolve_approval(pending, "skip", source="dashboard")
+    return JSONResponse(result)
+
+
+@app.post("/approvals/{approval_id}/edit")
+async def edit_approval(approval_id: str, req: EditApprovalRequest) -> JSONResponse:
+    """Patch email_payload (subject/content/to) — does NOT send. Operator
+    must call /approve afterwards to actually fire the email."""
+    pending = supabase_client.get_pending_approval(approval_id)
+    if pending is None:
+        raise HTTPException(404, "approval_not_found")
+    if pending.get("status") != "pending":
+        raise HTTPException(409, f"already_{pending.get('status')}")
+    payload = dict(pending.get("email_payload") or {})
+    if req.to is not None:
+        payload["to"] = req.to.strip()
+    if req.subject is not None:
+        payload["subject"] = req.subject
+    if req.content is not None:
+        payload["content"] = req.content
+    supabase_client.update_pending_approval(approval_id, email_payload=payload)
+    return JSONResponse({"approval_id": approval_id, "email_payload": payload, "status": "pending"})
 
 
 @app.post("/transcribe")

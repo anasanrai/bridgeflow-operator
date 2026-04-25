@@ -195,6 +195,28 @@ def update_pending_approval(approval_id: str, **fields) -> None:
         print(f"[supabase] update_pending_approval failed: {exc}")
 
 
+def list_pending_approvals(status: str | None = "pending", limit: int = 100) -> list[dict]:
+    """Return pending_approvals rows ordered newest first. Pass status=None
+    (or "all") to drop the filter."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        q = (
+            client.table("pending_approvals")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(limit)
+        )
+        if status and status != "all":
+            q = q.eq("status", status)
+        resp = q.execute()
+        return getattr(resp, "data", None) or []
+    except Exception as exc:
+        print(f"[supabase] list_pending_approvals failed: {exc}")
+        return []
+
+
 def get_pending_approval(approval_id: str) -> dict | None:
     client = get_client()
     if client is None or not approval_id:

@@ -7,6 +7,7 @@ import {
   IconBuilding,
   IconClock,
   IconDashboard,
+  IconHourglass,
   IconKey,
   IconLeads,
   IconLogo,
@@ -24,6 +25,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/pipeline", label: "Pipeline", icon: IconPipeline, shortcut: "G P" },
+  { href: "/review", label: "Human Review", icon: IconHourglass, shortcut: "G R" },
   { href: "/leads", label: "Leads", icon: IconLeads, shortcut: "G L" },
   { href: "/history", label: "History", icon: IconClock, shortcut: "G H" },
   { href: "/dashboard", label: "Dashboard", icon: IconDashboard, shortcut: "G D" },
@@ -35,6 +37,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [completeness, setCompleteness] = useState<Completeness>("empty");
+  const [pendingCount, setPendingCount] = useState<number>(0);
 
   useEffect(() => {
     setOpen(false);
@@ -55,6 +58,27 @@ export function Sidebar() {
       });
     return () => {
       abort = true;
+    };
+  }, [pathname]);
+
+  // Pending-approval count for the Human Review badge — refresh on nav,
+  // then poll every 15s so it stays in sync with Telegram/dashboard actions.
+  useEffect(() => {
+    let abort = false;
+    const tick = () =>
+      fetch("/api/approvals?status=pending&limit=99", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : { count: 0 }))
+        .then((data) => {
+          if (!abort) setPendingCount(Number(data?.count ?? 0));
+        })
+        .catch(() => {
+          if (!abort) setPendingCount(0);
+        });
+    tick();
+    const id = setInterval(tick, 15_000);
+    return () => {
+      abort = true;
+      clearInterval(id);
     };
   }, [pathname]);
 
@@ -119,6 +143,14 @@ export function Sidebar() {
                   }`}
                 />
                 <span className="flex-1 truncate">{item.label}</span>
+                {item.href === "/review" && pendingCount > 0 && (
+                  <span
+                    title={`${pendingCount} pending approval${pendingCount === 1 ? "" : "s"}`}
+                    className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-mono font-semibold bg-amber-500/15 border border-amber-500/45 text-amber-200 shadow-glow-warm"
+                  >
+                    {pendingCount}
+                  </span>
+                )}
                 {item.shortcut && (
                   <span className="hidden xl:inline text-[10px] font-mono text-faint">
                     {item.shortcut}

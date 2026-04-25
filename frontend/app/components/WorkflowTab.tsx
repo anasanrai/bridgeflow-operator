@@ -438,6 +438,17 @@ function WorkflowPreviewCard({
     () => (workflow ? toReactFlow(workflow) : { nodes: [], edges: [] }),
     [workflow]
   );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Reset selection when the workflow changes (e.g. refine pass).
+  useEffect(() => {
+    setSelectedId(null);
+  }, [workflow]);
+
+  const selectedRaw = useMemo(() => {
+    if (!workflow || !selectedId) return null;
+    return workflow.nodes.find((n) => n.name === selectedId) ?? null;
+  }, [workflow, selectedId]);
 
   return (
     <Card
@@ -450,7 +461,7 @@ function WorkflowPreviewCard({
                   n + (c.main?.reduce((m, arr) => m + arr.length, 0) ?? 0),
                 0
               )
-            } connections`
+            } connections · click any node to inspect`
           : "Visual node graph rendered with React Flow, n8n-style."
       }
       icon={<IconSparkle className="w-4 h-4" />}
@@ -459,7 +470,7 @@ function WorkflowPreviewCard({
       bodyClassName="p-0"
     >
       {workflow && (
-        <div className="h-[640px] bg-[#0a0a0c] border-t border-border">
+        <div className="relative h-[640px] bg-[#0a0a0c] border-t border-border">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -470,7 +481,11 @@ function WorkflowPreviewCard({
             maxZoom={2}
             nodesDraggable={false}
             nodesConnectable={false}
-            elementsSelectable={false}
+            elementsSelectable={true}
+            onNodeClick={(_, node) =>
+              setSelectedId((cur) => (cur === node.id ? null : node.id))
+            }
+            onPaneClick={() => setSelectedId(null)}
             proOptions={{ hideAttribution: true }}
             defaultEdgeOptions={{
               type: "smoothstep",
@@ -507,10 +522,223 @@ function WorkflowPreviewCard({
               className="!bg-[#15151a] !border !border-[#26262b] !rounded-md"
             />
           </ReactFlow>
+
+          {selectedRaw && (
+            <NodeDetailDrawer
+              node={selectedRaw}
+              workflow={workflow}
+              onClose={() => setSelectedId(null)}
+            />
+          )}
         </div>
       )}
     </Card>
   );
+}
+
+// ── Node detail drawer (click-to-inspect on the canvas) ────────────────
+
+function NodeDetailDrawer({
+  node,
+  workflow,
+  onClose,
+}: {
+  node: N8nNode;
+  workflow: N8nWorkflow;
+  onClose: () => void;
+}) {
+  const kind = nodeKind(
+    node.type,
+    countIncoming(workflow, node.name) > 0
+  );
+  const t = serviceTheme(node.type, node.name, kind);
+
+  // Inbound + outbound names for context.
+  const outbound = (workflow.connections?.[node.name]?.main ?? [])
+    .flatMap((arr, i) => arr.map((c) => `${i > 0 ? `[${i}] ` : ""}${c.node}`));
+  const inbound: string[] = [];
+  Object.entries(workflow.connections ?? {}).forEach(([src, conn]) => {
+    (conn.main ?? []).forEach((arr) =>
+      arr.forEach((c) => {
+        if (c.node === node.name) inbound.push(src);
+      })
+    );
+  });
+
+  const params = (node.parameters as any) ?? {};
+  const paramEntries = Object.entries(params).slice(0, 24);
+
+  const credEntries = Object.entries(node.credentials ?? {});
+
+  return (
+    <aside
+      className="absolute top-0 right-0 bottom-0 w-[360px] bg-[#101013] border-l border-[#26262b] shadow-[-12px_0_30px_-12px_rgba(0,0,0,0.7)] flex flex-col z-10 animate-fade-in-up"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <header className="flex items-start justify-between gap-2 px-4 py-3 border-b border-[#222225]">
+        <div className="flex items-start gap-2 min-w-0">
+          <div className={`w-9 h-9 rounded-md flex items-center justify-center shrink-0 ${t.iconBg} ${t.iconFg}`}>
+            {t.glyph}
+          </div>
+          <div className="min-w-0">
+            <div className="text-[13px] font-semibold text-white leading-tight truncate">
+              {node.name}
+            </div>
+            <div className="text-[10.5px] text-ink-muted/80 leading-tight font-mono truncate">
+              {t.label}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="text-muted hover:text-ink p-1 -mr-1 cursor-pointer"
+        >
+          <IconX className="w-4 h-4" />
+        </button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-3 space-y-4 text-[12px] text-ink-muted">
+        <DetailRow label="Type">
+          <code className="text-[11px] font-mono text-ink-muted bg-bg/60 border border-border rounded px-1.5 py-0.5 break-all">
+            {node.type}
+          </code>
+        </DetailRow>
+        {node.typeVersion != null && (
+          <DetailRow label="typeVersion">
+            <span className="font-mono text-ink-muted">{node.typeVersion}</span>
+          </DetailRow>
+        )}
+        {node.id && (
+          <DetailRow label="id">
+            <code className="text-[10.5px] font-mono text-faint break-all">{node.id}</code>
+          </DetailRow>
+        )}
+        {Array.isArray(node.position) && node.position.length === 2 && (
+          <DetailRow label="position">
+            <span className="font-mono text-faint">
+              [{node.position[0]}, {node.position[1]}]
+            </span>
+          </DetailRow>
+        )}
+
+        {(inbound.length > 0 || outbound.length > 0) && (
+          <DetailSection title="Connections">
+            {inbound.length > 0 && (
+              <ConnList label="From" items={inbound} />
+            )}
+            {outbound.length > 0 && (
+              <ConnList label="To" items={outbound} />
+            )}
+          </DetailSection>
+        )}
+
+        {credEntries.length > 0 && (
+          <DetailSection title="Credentials">
+            <ul className="space-y-1.5">
+              {credEntries.map(([credType, ref]) => (
+                <li
+                  key={credType}
+                  className="rounded-md border border-border bg-bg/40 px-2 py-1.5 flex items-center justify-between gap-2"
+                >
+                  <code className="text-[11px] font-mono text-ink-muted truncate">{credType}</code>
+                  <span className="text-[10.5px] text-faint truncate">
+                    {(ref as any)?.name || "(unnamed)"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </DetailSection>
+        )}
+
+        {paramEntries.length > 0 ? (
+          <DetailSection title="Parameters">
+            <ul className="space-y-1.5">
+              {paramEntries.map(([k, v]) => (
+                <li key={k} className="rounded-md border border-border bg-bg/40 px-2 py-1.5">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-faint">
+                    {k}
+                  </div>
+                  <div className="text-[11px] font-mono text-ink-muted whitespace-pre-wrap break-words mt-0.5">
+                    {formatParamValue(v)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </DetailSection>
+        ) : (
+          <div className="text-[11px] text-faint italic">No parameters set.</div>
+        )}
+      </div>
+
+      <footer className="px-4 py-2.5 border-t border-[#222225] text-[10px] font-mono text-faint flex items-center justify-between">
+        <span>tap pane to deselect</span>
+        <span className="uppercase tracking-wider">{kind}</span>
+      </footer>
+    </aside>
+  );
+}
+
+function countIncoming(wf: N8nWorkflow, name: string): number {
+  let n = 0;
+  Object.values(wf.connections ?? {}).forEach((c) =>
+    (c.main ?? []).forEach((arr) => arr.forEach((e) => {
+      if (e.node === name) n++;
+    }))
+  );
+  return n;
+}
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="text-[10px] font-mono uppercase tracking-wider text-faint w-20 shrink-0">
+        {label}
+      </span>
+      <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  );
+}
+
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="text-[10px] font-mono uppercase tracking-wider text-faint mb-1.5">
+        {title}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ConnList({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div className="mb-2 last:mb-0">
+      <div className="text-[10px] font-mono text-faint mb-1">{label}</div>
+      <ul className="space-y-1">
+        {items.map((name, i) => (
+          <li
+            key={`${label}-${name}-${i}`}
+            className="text-[11px] text-ink-muted bg-bg/40 border border-border rounded px-2 py-1 truncate"
+          >
+            {name}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function formatParamValue(v: unknown): string {
+  if (v == null) return "—";
+  if (typeof v === "string") return v.length > 320 ? v.slice(0, 320) + "…" : v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    const s = JSON.stringify(v, null, 2);
+    return s.length > 480 ? s.slice(0, 480) + "\n…" : s;
+  } catch {
+    return String(v);
+  }
 }
 
 // ── n8n node taxonomy + service icons ───────────────────────────────────

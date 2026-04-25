@@ -50,6 +50,13 @@ class TestEmailRequest(BaseModel):
     content: str | None = None
 
 
+class EditApprovalRequest(BaseModel):
+    """Dashboard "edit" — operator changes the held email payload before approving."""
+    to: str | None = None
+    subject: str | None = None
+    content: str | None = None
+
+
 # ── V2 Company identity vault ───────────────────────────────────────────
 
 class CompanyProfile(BaseModel):
