@@ -1,62 +1,102 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActionManifest } from "./components/ActionManifest";
 import { AgentStream } from "./components/AgentStream";
 import { AudioUpload } from "./components/AudioUpload";
+import { ConsultantChat } from "./components/ConsultantChat";
 import { LeadReport } from "./components/LeadReport";
 import { TranscriptUpload } from "./components/TranscriptUpload";
-import { IconMic, IconPipeline, IconSparkle, IconTarget } from "./lib/icons";
+import { WorkflowTab } from "./components/WorkflowTab";
+import {
+  IconMic,
+  IconPipeline,
+  IconSparkle,
+  IconTarget,
+} from "./lib/icons";
 import { useAgentStream } from "./lib/useAgentStream";
 
-type Mode = "transcript" | "voice";
+type Mode = "transcript" | "voice" | "workflow";
+
+function leadScore(results: ReturnType<typeof useAgentStream>["results"]): string {
+  const raw = (results?.qualification as any)?.score;
+  return typeof raw === "string" ? raw.toUpperCase() : "";
+}
 
 export default function PipelinePage() {
   const pipeline = useAgentStream();
   const [mode, setMode] = useState<Mode>("transcript");
 
+  const score = leadScore(pipeline.results);
+  const workflowEligible = score === "HOT" || score === "WARM";
+
+  // When a pipeline run finishes with HOT/WARM, surface the V2 tab.
+  useEffect(() => {
+    if (pipeline.results && workflowEligible) setMode("workflow");
+  }, [pipeline.results, workflowEligible]);
+
+  // If the user resets and the workflow tab is no longer valid, fall back.
+  useEffect(() => {
+    if (mode === "workflow" && !pipeline.results) setMode("transcript");
+  }, [mode, pipeline.results]);
+
   return (
     <div className="space-y-6">
       <PageHeader running={pipeline.running} callId={pipeline.callId} />
 
-      <ModeTabs mode={mode} setMode={setMode} disabled={pipeline.running} />
+      <ModeTabs
+        mode={mode}
+        setMode={setMode}
+        disabled={pipeline.running}
+        workflowEligible={workflowEligible}
+      />
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <section className="lg:col-span-2 space-y-4">
-          {mode === "transcript" ? (
-            <TranscriptUpload
-              running={pipeline.running}
-              onRun={pipeline.run}
-              onReset={pipeline.reset}
-            />
-          ) : (
-            <AudioUpload
-              running={pipeline.running}
-              onTranscribed={(text) => pipeline.run(text)}
-              onReset={pipeline.reset}
-            />
-          )}
+      {mode === "workflow" && pipeline.results ? (
+        <WorkflowTab results={pipeline.results} />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          <section className="lg:col-span-2 space-y-4">
+            {mode === "voice" ? (
+              <AudioUpload
+                running={pipeline.running}
+                onTranscribed={(text) => pipeline.run(text)}
+                onReset={pipeline.reset}
+              />
+            ) : (
+              <TranscriptUpload
+                running={pipeline.running}
+                onRun={pipeline.run}
+                onReset={pipeline.reset}
+              />
+            )}
 
-          {pipeline.error && (
-            <div className="rounded-xl border border-hot/40 bg-hot/5 p-4 text-sm text-hot">
-              {pipeline.error}
-            </div>
-          )}
+            {pipeline.error && (
+              <div className="rounded-xl border border-hot/40 bg-hot/5 p-4 text-sm text-hot">
+                {pipeline.error}
+              </div>
+            )}
 
-          <AgentStream agents={pipeline.agents} running={pipeline.running} />
-        </section>
+            <AgentStream agents={pipeline.agents} running={pipeline.running} />
+          </section>
 
-        <section className="lg:col-span-3 space-y-4">
-          {!pipeline.results && !pipeline.running && <EmptyState mode={mode} />}
-          {pipeline.running && !pipeline.results && <RunningState />}
-          {pipeline.results && (
-            <>
-              <LeadReport results={pipeline.results} />
-              <ActionManifest results={pipeline.results} />
-            </>
-          )}
-        </section>
-      </div>
+          <section className="lg:col-span-3 space-y-4">
+            {!pipeline.results && !pipeline.running && (
+              <EmptyState mode={mode === "workflow" ? "transcript" : mode} />
+            )}
+            {pipeline.running && !pipeline.results && <RunningState />}
+            {pipeline.results && (
+              <>
+                <LeadReport results={pipeline.results} />
+                <ActionManifest results={pipeline.results} />
+                <ConsultantChat
+                  pipelineId={pipeline.callId}
+                  results={pipeline.results}
+                />
+              </>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -65,19 +105,31 @@ function ModeTabs({
   mode,
   setMode,
   disabled,
+  workflowEligible,
 }: {
   mode: Mode;
   setMode: (m: Mode) => void;
   disabled: boolean;
+  workflowEligible: boolean;
 }) {
   const tabs: Array<{
     id: Mode;
     label: string;
-    badge?: string;
     icon: typeof IconPipeline;
+    accent?: "amber";
+    badge?: string;
+    available: boolean;
   }> = [
-    { id: "transcript", label: "Transcript", icon: IconPipeline },
-    { id: "voice", label: "Voice call", badge: "V2 Beta", icon: IconMic },
+    { id: "transcript", label: "Transcript", icon: IconPipeline, available: true },
+    { id: "voice", label: "Call Recording", icon: IconMic, available: true },
+    {
+      id: "workflow",
+      label: "V2 Workflow",
+      icon: IconSparkle,
+      accent: "amber",
+      badge: "Building Now",
+      available: workflowEligible,
+    },
   ];
 
   return (
@@ -85,18 +137,20 @@ function ModeTabs({
       {tabs.map((t) => {
         const active = mode === t.id;
         const Icon = t.icon;
-        const isBeta = !!t.badge;
+        const isAmber = t.accent === "amber";
+        const tabDisabled = disabled || !t.available;
         return (
           <button
             key={t.id}
             role="tab"
             aria-selected={active}
-            disabled={disabled}
+            disabled={tabDisabled}
             onClick={() => setMode(t.id)}
-            className={`relative inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+            title={!t.available ? "Available after a HOT or WARM pipeline run" : undefined}
+            className={`relative inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               active
-                ? isBeta
-                  ? "bg-amber-500/10 text-amber-200 border border-amber-500/30"
+                ? isAmber
+                  ? "bg-amber-500/10 text-amber-200 border border-amber-500/40"
                   : "bg-bg text-ink border border-border"
                 : "text-muted hover:text-ink border border-transparent"
             }`}

@@ -114,7 +114,7 @@ export default function DashboardPage() {
 
 type RoadmapItem = {
   version: string;
-  status: "live" | "beta" | "coming" | "roadmap";
+  status: "live" | "building" | "coming" | "roadmap";
   title: string;
   body: string;
 };
@@ -123,26 +123,26 @@ const ROADMAP: RoadmapItem[] = [
   {
     version: "V1",
     status: "live",
-    title: "Transcript → 5-Agent Intelligence",
-    body: "Paste a call transcript. Five Opus 4.7 agents qualify the lead, draft the campaign, fire Resend + Telegram, and self-review.",
+    title: "Call Recording + Transcript → 5-Agent Intelligence",
+    body: "Paste or upload a call recording. Five Opus 4.7 agents qualify the lead, draft the campaign, fire Resend + Telegram, and self-review.",
   },
   {
     version: "V2",
-    status: "beta",
-    title: "Voice Call → Transcription → Intelligence",
-    body: "Drop an .mp3 / .wav / .m4a. Groq Whisper-large-v3-turbo transcribes it; the same 5-agent pipeline runs automatically.",
+    status: "building",
+    title: "Intelligence → Playbook + Workflow Generator",
+    body: "Agent manifests render as a structured playbook, copyable production-ready n8n workflow JSON, credential checklist, visual workflow preview, and a manual handoff package.",
   },
   {
     version: "V3",
     status: "coming",
-    title: "Intelligence → n8n Workflow Generator",
-    body: "Action manifests get rendered as importable n8n workflows so reps can wire follow-ups into anything they already use.",
+    title: "Real Call Center — Inbound + Outbound Agents",
+    body: "Live call agents handle inbound and outbound calls. Every call recording automatically feeds the 5-agent pipeline. Works with your own call recordings too.",
   },
   {
     version: "V4",
     status: "roadmap",
-    title: "Autonomous Revenue Operator",
-    body: "Self-driving sales floor: monitor calls, requalify pipeline, run experiments on copy + cadence, and report weekly P&L impact.",
+    title: "Complete Autonomous Agency — MCP-Powered Department Agents",
+    body: "Each department runs dedicated Opus 4.7 agents empowered with MCP tools. Agents handle clients end-to-end. 5/95 human-to-agent ratio. Secure credential vault per agent. Full observability.",
   },
 ];
 
@@ -183,10 +183,10 @@ function RoadmapCard({ item }: { item: RoadmapItem }) {
       dot: "bg-accent shadow-glow-accent",
       mark: <IconCheck className="w-3.5 h-3.5" />,
     },
-    beta: {
-      wrap: "border-amber-500/40 bg-amber-500/[0.05]",
-      chip: "border-amber-500/40 text-amber-200 bg-amber-500/10",
-      dot: "bg-amber-400",
+    building: {
+      wrap: "border-amber-500/45 bg-amber-500/[0.06]",
+      chip: "border-amber-500/45 text-amber-200 bg-amber-500/10",
+      dot: "bg-amber-400 animate-blink",
       mark: <IconSparkle className="w-3.5 h-3.5" />,
     },
     coming: {
@@ -205,7 +205,7 @@ function RoadmapCard({ item }: { item: RoadmapItem }) {
   const p = palette[item.status];
   const label: Record<RoadmapItem["status"], string> = {
     live: "LIVE",
-    beta: "BETA",
+    building: "BUILDING NOW",
     coming: "COMING",
     roadmap: "ROADMAP",
   };

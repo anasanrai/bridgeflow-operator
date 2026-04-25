@@ -97,3 +97,172 @@ def insert_actions(call_id: str | None, actions_output: dict) -> None:
                 "status": action.get("status", "queued"),
             },
         )
+
+
+# ── V2: company identity vault ──────────────────────────────────────────
+
+DEFAULT_PROFILE_ID = "default"
+
+COMPANY_FIELDS = [
+    "company_name",
+    "industry",
+    "what_you_sell",
+    "target_client",
+    "agent_name",
+    "agent_tone",
+    "agent_persona",
+    "pricing_notes",
+    "objection_1_q",
+    "objection_1_a",
+    "objection_2_q",
+    "objection_2_a",
+    "objection_3_q",
+    "objection_3_a",
+    "booking_link",
+    "custom_instructions",
+]
+
+
+def get_company_profile() -> dict | None:
+    """Return the singleton default company profile, or None when the table
+    doesn't exist / has no row / Supabase isn't configured."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("company_profiles")
+            .select("*")
+            .eq("id", DEFAULT_PROFILE_ID)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        print(f"[supabase] get_company_profile failed: {exc}")
+        return None
+
+
+def upsert_company_profile(payload: dict) -> dict | None:
+    """Upsert the default profile. Only whitelisted fields are persisted."""
+    client = get_client()
+    if client is None:
+        return None
+    row: dict = {"id": DEFAULT_PROFILE_ID}
+    for k in COMPANY_FIELDS:
+        if k in payload:
+            v = payload.get(k)
+            row[k] = v if not isinstance(v, str) else v.strip()
+    try:
+        resp = (
+            client.table("company_profiles")
+            .upsert(row, on_conflict="id")
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        print(f"[supabase] upsert_company_profile failed: {exc}")
+        return None
+
+
+# ── V2: Telegram-gated email approvals ──────────────────────────────────
+
+def insert_pending_approval(
+    call_id: str,
+    email_payload: dict,
+    telegram_message_id: int | None = None,
+) -> dict | None:
+    return _safe_insert(
+        "pending_approvals",
+        {
+            "call_id": call_id,
+            "email_payload": email_payload,
+            "status": "pending",
+            "telegram_message_id": telegram_message_id,
+        },
+    )
+
+
+def update_pending_approval(approval_id: str, **fields) -> None:
+    client = get_client()
+    if client is None or not approval_id:
+        return
+    try:
+        client.table("pending_approvals").update(fields).eq("id", approval_id).execute()
+    except Exception as exc:
+        print(f"[supabase] update_pending_approval failed: {exc}")
+
+
+def get_pending_approval_by_message_id(telegram_message_id: int) -> dict | None:
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("pending_approvals")
+            .select("*")
+            .eq("telegram_message_id", telegram_message_id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        print(f"[supabase] get_pending_approval_by_message_id failed: {exc}")
+        return None
+
+
+def get_latest_pending_approval() -> dict | None:
+    """Fallback when a Telegram reply has no reply_to_message correlation."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("pending_approvals")
+            .select("*")
+            .eq("status", "pending")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        print(f"[supabase] get_latest_pending_approval failed: {exc}")
+        return None
+
+
+def get_call_record(call_id: str) -> dict | None:
+    client = get_client()
+    if client is None or not call_id:
+        return None
+    try:
+        resp = (
+            client.table("calls").select("*").eq("id", call_id).limit(1).execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        print(f"[supabase] get_call_record failed: {exc}")
+        return None
+
+
+def get_analyses_for_call(call_id: str) -> list[dict]:
+    client = get_client()
+    if client is None or not call_id:
+        return []
+    try:
+        resp = (
+            client.table("analyses")
+            .select("agent_name,agent_output,created_at")
+            .eq("call_id", call_id)
+            .order("created_at")
+            .execute()
+        )
+        return getattr(resp, "data", None) or []
+    except Exception as exc:
+        print(f"[supabase] get_analyses_for_call failed: {exc}")
+        return []

@@ -206,6 +206,48 @@ export const IconKey = (p: Props) => (
   </svg>
 );
 
+export const IconBuilding = (p: Props) => (
+  <svg {...base} {...p}>
+    <rect x="4" y="3" width="16" height="18" rx="2" />
+    <path d="M9 7h2" />
+    <path d="M13 7h2" />
+    <path d="M9 11h2" />
+    <path d="M13 11h2" />
+    <path d="M9 15h2" />
+    <path d="M13 15h2" />
+    <path d="M9 21v-3h6v3" />
+  </svg>
+);
+
+export const IconChat = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M21 11.5a8.38 8.38 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.1A8.38 8.38 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5z" />
+  </svg>
+);
+
+export const IconLock = (p: Props) => (
+  <svg {...base} {...p}>
+    <rect x="4" y="11" width="16" height="9" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </svg>
+);
+
+export const IconCopy = (p: Props) => (
+  <svg {...base} {...p}>
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+  </svg>
+);
+
+export const IconHourglass = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M6 3h12" />
+    <path d="M6 21h12" />
+    <path d="M7 3v3a5 5 0 0 0 10 0V3" />
+    <path d="M7 21v-3a5 5 0 0 1 10 0v3" />
+  </svg>
+);
+
 export const IconMic = (p: Props) => (
   <svg {...base} {...p}>
     <rect x="9" y="3" width="6" height="11" rx="3" />

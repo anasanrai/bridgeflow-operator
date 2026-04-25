@@ -142,10 +142,7 @@ export function AudioUpload({ running, onTranscribed, onReset }: Props) {
       <div className="flex items-center justify-between px-5 py-4 border-b border-border">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-ink">Voice call</h2>
-            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-300/90 bg-amber-500/10">
-              V2 Beta
-            </span>
+            <h2 className="text-sm font-semibold text-ink">Call recording</h2>
             <span className="text-[10px] font-mono text-faint px-1.5 py-0.5 rounded border border-border">
               groq · whisper-large-v3-turbo
             </span>

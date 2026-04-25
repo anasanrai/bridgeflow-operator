@@ -4,6 +4,7 @@ import {
   IconArchive,
   IconCalendar,
   IconCheck,
+  IconHourglass,
   IconMail,
   IconSend,
   IconTelegram,
@@ -51,6 +52,13 @@ const STATUS_STYLES: Record<string, string> = {
   sent: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5",
   sending: "text-accent border-accent/40 bg-accent/10",
   failed: "text-hot border-hot/40 bg-hot/10",
+  awaiting_approval: "text-amber-200 border-amber-500/40 bg-amber-500/10",
+  approved: "text-emerald-400 border-emerald-500/30 bg-emerald-500/5",
+  skipped: "text-faint border-border bg-bg",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  awaiting_approval: "awaiting your approval",
 };
 
 export function ActionManifest({ results }: Props) {
@@ -129,6 +137,16 @@ export function ActionManifest({ results }: Props) {
                           <span className="inline-flex items-center gap-1">
                             <span className="w-1 h-1 rounded-full bg-current animate-blink" />
                             sending
+                          </span>
+                        ) : status === "awaiting_approval" ? (
+                          <span className="inline-flex items-center gap-1">
+                            <IconHourglass className="w-2.5 h-2.5 animate-pulse" />
+                            {STATUS_LABEL.awaiting_approval}
+                          </span>
+                        ) : status === "approved" ? (
+                          <span className="inline-flex items-center gap-1">
+                            <IconCheck className="w-2.5 h-2.5" />
+                            approved
                           </span>
                         ) : (
                           status

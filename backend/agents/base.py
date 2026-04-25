@@ -28,12 +28,14 @@ def _get_client() -> AsyncAnthropic:
     return _client
 
 
-async def stream_agent(system: str, user: str) -> AsyncIterator[str]:
+async def stream_agent(
+    system: str, user: str, max_tokens: int = MAX_TOKENS
+) -> AsyncIterator[str]:
     """Yield text deltas from an Opus 4.7 run."""
     client = _get_client()
     async with client.messages.stream(
         model=MODEL,
-        max_tokens=MAX_TOKENS,
+        max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
     ) as stream:
@@ -41,13 +43,15 @@ async def stream_agent(system: str, user: str) -> AsyncIterator[str]:
             yield text
 
 
-async def run_agent(system: str, user: str) -> tuple[str, dict]:
+async def run_agent(
+    system: str, user: str, max_tokens: int = MAX_TOKENS
+) -> tuple[str, dict]:
     """Run an agent and return (raw_text, parsed_json).
 
     Buffers the stream — use stream_agent() instead when you need live deltas.
     """
     buffer = []
-    async for chunk in stream_agent(system, user):
+    async for chunk in stream_agent(system, user, max_tokens=max_tokens):
         buffer.append(chunk)
     raw = "".join(buffer)
     return raw, extract_json(raw)

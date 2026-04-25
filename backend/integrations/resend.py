@@ -88,6 +88,98 @@ def _body_as_html(body: str) -> str:
     return "<div>" + escaped.replace("\n", "<br>") + "</div>"
 
 
+async def send_single_email(payload: dict) -> dict[str, Any]:
+    """Send one already-resolved email payload (to/subject/content). Used by
+    the Telegram webhook after the operator approves a held draft."""
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        return {"sent": False, "skipped_reason": "resend_credentials_missing"}
+    recipient = (payload.get("to") or "").strip()
+    subject = (payload.get("subject") or "").strip()
+    body = payload.get("content") or ""
+    if not recipient or not subject or not body:
+        return {"sent": False, "error": "missing_recipient_or_content"}
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                RESEND_API,
+                headers=headers,
+                json={
+                    "from": _from_address(),
+                    "to": [recipient],
+                    "subject": subject,
+                    "html": _body_as_html(body),
+                    "text": body,
+                },
+            )
+            if resp.status_code in (200, 201, 202):
+                data = resp.json()
+                return {"sent": True, "id": data.get("id"), "to": recipient}
+            return {
+                "sent": False,
+                "error": f"resend {resp.status_code}",
+                "detail": resp.text[:300],
+            }
+    except Exception as exc:
+        return {"sent": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def hold_immediate_emails_for_approval(
+    actions_output: dict,
+    call_analysis: dict,
+    campaign: dict,
+) -> list[dict[str, Any]]:
+    """V2: instead of firing emails, mark immediate-priority sends as
+    awaiting_approval and return their resolved payloads (recipient + subject
+    + body) so the pipeline can store a pending_approval row and prompt the
+    operator via Telegram. Mirrors send_immediate_emails' filtering /
+    recipient-resolution / content-resolution logic so Agent 5 sees the same
+    final action shape — just gated on a human reply."""
+    actions = actions_output.get("actions") or []
+    prospect_email = (call_analysis.get("prospect") or {}).get("email")
+
+    held: list[dict[str, Any]] = []
+    used_campaign_idxs: set[int] = set()
+
+    targets = [
+        a for a in actions
+        if (a.get("type") == "send_email" and a.get("priority") == "immediate")
+    ]
+    for action in targets:
+        recipient = _pick_recipient(action, prospect_email)
+        subject, body = _pick_content(action, campaign, used_campaign_idxs)
+
+        if not recipient or not subject or not body:
+            action["status"] = "failed"
+            action["execution"] = {
+                "error": "missing_recipient" if not recipient else "missing_subject_or_body"
+            }
+            continue
+
+        action["status"] = "awaiting_approval"
+        action["execution"] = {
+            "provider": "resend",
+            "to": recipient,
+            "subject": subject,
+            "held_pending_telegram_approval": True,
+        }
+        held.append(
+            {
+                "sequence": action.get("sequence"),
+                "to": recipient,
+                "subject": subject,
+                "content": body,
+            }
+        )
+
+    return held
+
+
 async def send_immediate_emails(
     actions_output: dict,
     call_analysis: dict,

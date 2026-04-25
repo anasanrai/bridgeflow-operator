@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  IconBuilding,
   IconDashboard,
   IconKey,
   IconLeads,
@@ -26,12 +27,33 @@ const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: IconDashboard, shortcut: "G D" },
 ];
 
+type Completeness = "complete" | "partial" | "empty";
+
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [completeness, setCompleteness] = useState<Completeness>("empty");
 
   useEffect(() => {
     setOpen(false);
+  }, [pathname]);
+
+  // Refetch completeness on every nav change so the dot updates after the
+  // user saves on /settings/company.
+  useEffect(() => {
+    let abort = false;
+    fetch("/api/company-profile", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { profile: null }))
+      .then((data) => {
+        if (abort) return;
+        setCompleteness(profileCompleteness(data?.profile));
+      })
+      .catch(() => {
+        if (!abort) setCompleteness("empty");
+      });
+    return () => {
+      abort = true;
+    };
   }, [pathname]);
 
   return (
@@ -108,6 +130,24 @@ export function Sidebar() {
           <div className="px-2 pt-5 pb-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
             System
           </div>
+          <Link
+            href="/settings/company"
+            className={`group flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-colors cursor-pointer ${
+              isActive(pathname, "/settings/company")
+                ? "bg-white/[0.04] text-ink"
+                : "text-ink-muted hover:text-ink hover:bg-white/[0.03]"
+            }`}
+          >
+            <IconBuilding
+              className={`w-4 h-4 transition-colors ${
+                isActive(pathname, "/settings/company")
+                  ? "text-accent"
+                  : "text-muted group-hover:text-ink"
+              }`}
+            />
+            <span className="flex-1 text-left">Company</span>
+            <CompletenessDot value={completeness} />
+          </Link>
           <button
             type="button"
             className="w-full group flex items-center gap-3 px-2.5 py-2 rounded-md text-sm text-ink-muted hover:text-ink hover:bg-white/[0.03] transition-colors cursor-pointer"
@@ -134,4 +174,49 @@ function isActive(pathname: string | null, href: string): boolean {
   if (!pathname) return false;
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+const REQUIRED_FIELDS = [
+  "company_name",
+  "industry",
+  "what_you_sell",
+  "target_client",
+  "agent_name",
+  "agent_tone",
+  "pricing_notes",
+] as const;
+
+const OPTIONAL_FIELDS = [
+  "agent_persona",
+  "objection_1_q",
+  "objection_1_a",
+  "objection_2_q",
+  "objection_2_a",
+  "objection_3_q",
+  "objection_3_a",
+  "booking_link",
+  "custom_instructions",
+] as const;
+
+export function profileCompleteness(profile: any): Completeness {
+  if (!profile) return "empty";
+  const filled = (k: string) => {
+    const v = profile?.[k];
+    return typeof v === "string" && v.trim().length > 0;
+  };
+  const reqFilled = REQUIRED_FIELDS.filter(filled).length;
+  const optFilled = OPTIONAL_FIELDS.filter(filled).length;
+  if (reqFilled === REQUIRED_FIELDS.length && optFilled >= 3) return "complete";
+  if (reqFilled === 0 && optFilled === 0) return "empty";
+  return "partial";
+}
+
+function CompletenessDot({ value }: { value: Completeness }) {
+  const meta = {
+    complete: { cls: "bg-accent shadow-glow-accent", title: "Company profile complete" },
+    partial: { cls: "bg-amber-400", title: "Company profile partially filled" },
+    empty: { cls: "bg-hot/80 shadow-glow-hot", title: "Company profile is empty" },
+  } as const;
+  const m = meta[value];
+  return <span title={m.title} className={`w-1.5 h-1.5 rounded-full ${m.cls}`} />;
 }
