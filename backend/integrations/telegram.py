@@ -10,6 +10,8 @@ import os
 import httpx
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
+TELEGRAM_ANSWER_CB = "https://api.telegram.org/bot{token}/answerCallbackQuery"
+TELEGRAM_EDIT_MARKUP = "https://api.telegram.org/bot{token}/editMessageReplyMarkup"
 
 
 def telegram_configured() -> bool:
@@ -86,8 +88,12 @@ def format_approval_prompt(
     qualification: dict,
     call_analysis: dict,
     email_payload: dict,
+    *,
+    with_buttons: bool = False,
 ) -> str:
-    """The exact Telegram approval message format from the V2 spec."""
+    """The Telegram approval message body. When with_buttons=True we drop
+    the trailing 'Reply: APPROVE/EDIT/SKIP' lines because the inline
+    keyboard speaks for itself."""
     score = (qualification.get("score") or "").upper() or "LEAD"
     confidence = qualification.get("confidence", "?")
     decision = (qualification.get("decision") or "—").replace("_", " ")
@@ -97,22 +103,45 @@ def format_approval_prompt(
     subject = email_payload.get("subject") or "(no subject)"
     body_preview = _truncate(email_payload.get("content"), 150)
 
-    return (
+    base = (
         f"[{score}] {name} @ {company}\n"
         f"Score: {confidence}% | {decision}\n"
         "\n"
         "📧 Draft email ready:\n"
         f"Subject: {subject}\n"
-        f"Preview: {body_preview}\n"
-        "\n"
-        "Reply:\n"
+        f"Preview: {body_preview}"
+    )
+    if with_buttons:
+        return base + "\n\nTap to act ↓"
+    return (
+        base
+        + "\n\nReply:\n"
         "✅ APPROVE - send now\n"
         "✏️ EDIT - send me full draft\n"
         "⏭️ SKIP - archive lead"
     )
 
 
-async def send_text(text: str, *, reply_to_message_id: int | None = None) -> dict:
+def _approval_keyboard(approval_id: str) -> dict:
+    """Telegram inline keyboard: 3 buttons in one row, callback_data carries
+    the action verb + pending_approvals.id."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Approve & send", "callback_data": f"approve:{approval_id}"},
+                {"text": "✏️ Edit", "callback_data": f"edit:{approval_id}"},
+                {"text": "⏭️ Skip", "callback_data": f"skip:{approval_id}"},
+            ]
+        ]
+    }
+
+
+async def send_text(
+    text: str,
+    *,
+    reply_to_message_id: int | None = None,
+    reply_markup: dict | None = None,
+) -> dict:
     """Generic Telegram sendMessage. Returns {ok, message_id?, error?}.
     Never raises."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -126,6 +155,8 @@ async def send_text(text: str, *, reply_to_message_id: int | None = None) -> dic
     }
     if reply_to_message_id is not None:
         payload["reply_to_message_id"] = reply_to_message_id
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(TELEGRAM_API.format(token=token), json=payload)
@@ -145,8 +176,51 @@ async def send_approval_prompt(
     qualification: dict,
     call_analysis: dict,
     email_payload: dict,
+    *,
+    approval_id: str | None = None,
 ) -> dict:
-    """Send the Telegram approval prompt for a held immediate email.
-    Returns {ok, message_id?, error?}."""
-    text = format_approval_prompt(qualification, call_analysis, email_payload)
-    return await send_text(text)
+    """Send the Telegram approval prompt for a held immediate email. When
+    approval_id is provided, attach an inline keyboard so the operator can
+    tap APPROVE/EDIT/SKIP instead of typing it. Returns {ok, message_id?, error?}."""
+    text = format_approval_prompt(
+        qualification, call_analysis, email_payload, with_buttons=approval_id is not None
+    )
+    reply_markup = _approval_keyboard(approval_id) if approval_id else None
+    return await send_text(text, reply_markup=reply_markup)
+
+
+async def answer_callback_query(callback_query_id: str, text: str | None = None) -> None:
+    """Acknowledge a tapped inline button so Telegram stops the spinner.
+    Best-effort — never raises."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token or not callback_query_id:
+        return
+    payload: dict = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            await client.post(TELEGRAM_ANSWER_CB.format(token=token), json=payload)
+    except Exception:
+        pass
+
+
+async def clear_message_keyboard(message_id: int) -> None:
+    """Strip the inline keyboard off a previously-sent approval message so
+    the operator can't double-tap. Best-effort — never raises."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id or not message_id:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            await client.post(
+                TELEGRAM_EDIT_MARKUP.format(token=token),
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "reply_markup": {"inline_keyboard": []},
+                },
+            )
+    except Exception:
+        pass

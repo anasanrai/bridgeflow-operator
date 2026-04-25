@@ -195,6 +195,25 @@ def update_pending_approval(approval_id: str, **fields) -> None:
         print(f"[supabase] update_pending_approval failed: {exc}")
 
 
+def get_pending_approval(approval_id: str) -> dict | None:
+    client = get_client()
+    if client is None or not approval_id:
+        return None
+    try:
+        resp = (
+            client.table("pending_approvals")
+            .select("*")
+            .eq("id", approval_id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(resp, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        print(f"[supabase] get_pending_approval failed: {exc}")
+        return None
+
+
 def get_pending_approval_by_message_id(telegram_message_id: int) -> dict | None:
     client = get_client()
     if client is None:

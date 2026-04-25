@@ -1,4 +1,6 @@
 from .telegram import (
+    answer_callback_query as telegram_answer_callback,
+    clear_message_keyboard as telegram_clear_keyboard,
     notify_hot_lead,
     send_approval_prompt,
     send_text as send_telegram_text,
@@ -22,6 +24,8 @@ __all__ = [
     "send_approval_prompt",
     "send_telegram_text",
     "telegram_configured",
+    "telegram_answer_callback",
+    "telegram_clear_keyboard",
     "send_immediate_emails",
     "send_single_email",
     "hold_immediate_emails_for_approval",

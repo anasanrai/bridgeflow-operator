@@ -60,6 +60,8 @@ from integrations import (  # noqa: E402
     send_immediate_emails,
     send_single_email,
     send_telegram_text,
+    telegram_answer_callback,
+    telegram_clear_keyboard,
     telegram_configured,
     transcribe_bytes,
 )
@@ -272,21 +274,31 @@ async def pipeline_stream(transcript: str) -> AsyncIterator[str]:
 
         # If we held emails earlier, send the approval prompt to Telegram now
         # (after Agent 5) and persist a pending_approvals row per held email.
+        # Order: insert row first so we can stamp the inline-keyboard
+        # callback_data with the approval_id, then send the prompt, then
+        # update the row with the returned message_id (used for reply-to
+        # correlation when the operator types instead of tapping).
         if held_emails_for_approval and call_id:
             pending_records: list[dict] = []
             for held in held_emails_for_approval:
+                pending = supabase_client.insert_pending_approval(
+                    call_id, held, telegram_message_id=None
+                )
+                approval_id = (pending or {}).get("id")
                 tg_resp = await send_approval_prompt(
                     outputs["lead_qualifier"],
                     outputs["call_analyst"],
                     held,
+                    approval_id=approval_id,
                 )
                 msg_id = tg_resp.get("message_id") if tg_resp.get("ok") else None
-                pending = supabase_client.insert_pending_approval(
-                    call_id, held, telegram_message_id=msg_id
-                )
+                if approval_id and msg_id:
+                    supabase_client.update_pending_approval(
+                        approval_id, telegram_message_id=msg_id
+                    )
                 pending_records.append(
                     {
-                        "id": (pending or {}).get("id"),
+                        "id": approval_id,
                         "to": held.get("to"),
                         "subject": held.get("subject"),
                         "telegram_sent": bool(tg_resp.get("ok")),
@@ -471,62 +483,31 @@ def _classify_reply(text: str) -> str | None:
     return None
 
 
-@app.post("/telegram-webhook")
-async def telegram_webhook(request: Request) -> JSONResponse:
-    """Telegram setWebhook posts updates here. We accept text replies that
-    start with APPROVE / EDIT / SKIP and act on the matching pending approval.
-    Always returns 200 — Telegram retries on non-200, which we don't want."""
-    try:
-        update = await request.json()
-    except Exception:
-        return JSONResponse({"ok": True, "ignored": "invalid_json"})
-
-    msg = update.get("message") or update.get("channel_post") or {}
-    text = msg.get("text") or msg.get("caption") or ""
-    action = _classify_reply(text)
-    if not action:
-        return JSONResponse({"ok": True, "ignored": "no_command"})
-
-    # Correlate with the original approval prompt via reply_to_message; fall
-    # back to the most recent pending approval.
-    reply_to = msg.get("reply_to_message") or {}
-    target_msg_id = reply_to.get("message_id")
-    pending = (
-        supabase_client.get_pending_approval_by_message_id(target_msg_id)
-        if target_msg_id
-        else None
-    )
-    if pending is None:
-        pending = supabase_client.get_latest_pending_approval()
-    if pending is None:
-        await send_telegram_text("No pending approval to act on.")
-        return JSONResponse({"ok": True, "ignored": "no_pending_approval"})
-
-    if pending.get("status") != "pending":
-        await send_telegram_text(
-            f"That approval was already {pending.get('status')}."
-        )
-        return JSONResponse(
-            {"ok": True, "ignored": "already_resolved", "status": pending.get("status")}
-        )
-
+async def _resolve_approval(
+    pending: dict, action: str, *, source: str
+) -> dict:
+    """Apply APPROVE/EDIT/SKIP to a pending_approvals row. Returns a result
+    dict the caller can serialise. Used by both the text-reply path and the
+    inline-keyboard callback path so behavior stays consistent."""
     approval_id = pending.get("id")
     payload = pending.get("email_payload") or {}
+    msg_id = pending.get("telegram_message_id")
 
     if action == "skip":
         supabase_client.update_pending_approval(
             approval_id, status="skipped", approved_at=None
         )
-        # Reflect in the actions table so the manifest UI flips ⏳ → ⏭ skipped.
         supabase_client.update_action_status(
             pending.get("call_id"),
             payload.get("sequence"),
             {"status": "skipped"},
         )
+        if msg_id:
+            await telegram_clear_keyboard(msg_id)
         await send_telegram_text(
             f"⏭️ Skipped. Email to {payload.get('to') or 'recipient'} archived."
         )
-        return JSONResponse({"ok": True, "action": "skipped"})
+        return {"ok": True, "action": "skipped", "via": source}
 
     if action == "edit":
         body = payload.get("content") or "(empty)"
@@ -535,14 +516,22 @@ async def telegram_webhook(request: Request) -> JSONResponse:
         full = (
             f"✏️ Full draft:\n\n"
             f"To: {recipient}\nSubject: {subject}\n\n{body}\n\n"
-            "Reply with APPROVE / SKIP after editing in your email client."
+            "Tap ✅ Approve when ready, or ⏭️ Skip to archive."
         )
-        await send_telegram_text(full)
-        # Status stays pending; user still needs to APPROVE/SKIP after editing.
-        return JSONResponse({"ok": True, "action": "edit_drafted"})
+        # Send the full draft as a fresh message that *also* carries the
+        # Approve/Skip buttons, so the operator can act without scrolling
+        # back to the original prompt.
+        from integrations.telegram import _approval_keyboard  # type: ignore
+        await send_telegram_text(
+            full,
+            reply_markup=_approval_keyboard(approval_id) if approval_id else None,
+        )
+        return {"ok": True, "action": "edit_drafted", "via": source}
 
     # action == "approve"
     result = await send_single_email(payload)
+    if msg_id:
+        await telegram_clear_keyboard(msg_id)
     if result.get("sent"):
         supabase_client.update_pending_approval(
             approval_id,
@@ -557,9 +546,12 @@ async def telegram_webhook(request: Request) -> JSONResponse:
         await send_telegram_text(
             f"✅ Sent to {payload.get('to')}. Resend id: {result.get('id')}"
         )
-        return JSONResponse(
-            {"ok": True, "action": "approved", "resend_id": result.get("id")}
-        )
+        return {
+            "ok": True,
+            "action": "approved",
+            "resend_id": result.get("id"),
+            "via": source,
+        }
     error = result.get("error") or result.get("skipped_reason") or "unknown"
     supabase_client.update_action_status(
         pending.get("call_id"),
@@ -567,7 +559,79 @@ async def telegram_webhook(request: Request) -> JSONResponse:
         {"status": "failed"},
     )
     await send_telegram_text(f"❌ Send failed: {error}")
-    return JSONResponse({"ok": True, "action": "approve_failed", "error": error})
+    return {"ok": True, "action": "approve_failed", "error": error, "via": source}
+
+
+@app.post("/telegram-webhook")
+async def telegram_webhook(request: Request) -> JSONResponse:
+    """Telegram setWebhook posts updates here. Two paths:
+      1) callback_query — operator tapped an inline button (preferred).
+      2) message text APPROVE/EDIT/SKIP — manual reply (fallback).
+    Always returns 200 — Telegram retries on non-200, which we don't want."""
+    try:
+        update = await request.json()
+    except Exception:
+        return JSONResponse({"ok": True, "ignored": "invalid_json"})
+
+    # ── Path 1: tapped inline keyboard button ──
+    cb = update.get("callback_query")
+    if cb:
+        cb_id = cb.get("id")
+        data = cb.get("data") or ""
+        verb, _, approval_id = data.partition(":")
+        if verb not in {"approve", "edit", "skip"} or not approval_id:
+            await telegram_answer_callback(cb_id, "Unrecognised action.")
+            return JSONResponse({"ok": True, "ignored": "bad_callback_data"})
+
+        pending = supabase_client.get_pending_approval(approval_id)
+        if pending is None:
+            await telegram_answer_callback(cb_id, "Approval not found.")
+            return JSONResponse({"ok": True, "ignored": "approval_not_found"})
+
+        if pending.get("status") != "pending" and verb != "edit":
+            await telegram_answer_callback(
+                cb_id, f"Already {pending.get('status')}."
+            )
+            return JSONResponse(
+                {"ok": True, "ignored": "already_resolved", "status": pending.get("status")}
+            )
+
+        # Acknowledge tap immediately so Telegram stops the spinner.
+        ack_text = {"approve": "Sending…", "edit": "Drafting full…", "skip": "Skipping…"}[verb]
+        await telegram_answer_callback(cb_id, ack_text)
+        result = await _resolve_approval(pending, verb, source="button")
+        return JSONResponse(result)
+
+    # ── Path 2: typed text reply ──
+    msg = update.get("message") or update.get("channel_post") or {}
+    text = msg.get("text") or msg.get("caption") or ""
+    action = _classify_reply(text)
+    if not action:
+        return JSONResponse({"ok": True, "ignored": "no_command"})
+
+    reply_to = msg.get("reply_to_message") or {}
+    target_msg_id = reply_to.get("message_id")
+    pending = (
+        supabase_client.get_pending_approval_by_message_id(target_msg_id)
+        if target_msg_id
+        else None
+    )
+    if pending is None:
+        pending = supabase_client.get_latest_pending_approval()
+    if pending is None:
+        await send_telegram_text("No pending approval to act on.")
+        return JSONResponse({"ok": True, "ignored": "no_pending_approval"})
+
+    if pending.get("status") != "pending" and action != "edit":
+        await send_telegram_text(
+            f"That approval was already {pending.get('status')}."
+        )
+        return JSONResponse(
+            {"ok": True, "ignored": "already_resolved", "status": pending.get("status")}
+        )
+
+    result = await _resolve_approval(pending, action, source="text")
+    return JSONResponse(result)
 
 
 @app.get("/leads")
