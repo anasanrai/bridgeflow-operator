@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { StatCard } from "../components/StatCard";
 import {
   IconCheck,
+  IconCircle,
   IconFlame,
+  IconRoadmap,
+  IconSparkle,
   IconTarget,
   IconUsers,
 } from "../lib/icons";
@@ -103,7 +106,133 @@ export default function DashboardPage() {
         <ScoreDistribution stats={stats} />
         <RecentLeads leads={leads.slice(0, 5)} loading={loading} />
       </div>
+
+      <Roadmap />
     </div>
+  );
+}
+
+type RoadmapItem = {
+  version: string;
+  status: "live" | "beta" | "coming" | "roadmap";
+  title: string;
+  body: string;
+};
+
+const ROADMAP: RoadmapItem[] = [
+  {
+    version: "V1",
+    status: "live",
+    title: "Transcript → 5-Agent Intelligence",
+    body: "Paste a call transcript. Five Opus 4.7 agents qualify the lead, draft the campaign, fire Resend + Telegram, and self-review.",
+  },
+  {
+    version: "V2",
+    status: "beta",
+    title: "Voice Call → Transcription → Intelligence",
+    body: "Drop an .mp3 / .wav / .m4a. Groq Whisper-large-v3-turbo transcribes it; the same 5-agent pipeline runs automatically.",
+  },
+  {
+    version: "V3",
+    status: "coming",
+    title: "Intelligence → n8n Workflow Generator",
+    body: "Action manifests get rendered as importable n8n workflows so reps can wire follow-ups into anything they already use.",
+  },
+  {
+    version: "V4",
+    status: "roadmap",
+    title: "Autonomous Revenue Operator",
+    body: "Self-driving sales floor: monitor calls, requalify pipeline, run experiments on copy + cadence, and report weekly P&L impact.",
+  },
+];
+
+function Roadmap() {
+  return (
+    <section className="rounded-xl border border-border bg-surface shadow-inset-hair p-5">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-md bg-accent/10 border border-accent/30 text-accent flex items-center justify-center">
+            <IconRoadmap className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-[10px] font-medium uppercase tracking-wider text-faint">
+              Roadmap
+            </div>
+            <div className="text-sm font-semibold text-ink">Where this is going</div>
+          </div>
+        </div>
+        <span className="text-[11px] font-mono text-muted">
+          built with Claude Opus 4.7
+        </span>
+      </div>
+
+      <ol className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+        {ROADMAP.map((item) => (
+          <RoadmapCard key={item.version} item={item} />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function RoadmapCard({ item }: { item: RoadmapItem }) {
+  const palette: Record<RoadmapItem["status"], { wrap: string; chip: string; dot: string; mark: JSX.Element }> = {
+    live: {
+      wrap: "border-accent/40 bg-accent/[0.04]",
+      chip: "border-accent/40 text-accent bg-accent/10",
+      dot: "bg-accent shadow-glow-accent",
+      mark: <IconCheck className="w-3.5 h-3.5" />,
+    },
+    beta: {
+      wrap: "border-amber-500/40 bg-amber-500/[0.05]",
+      chip: "border-amber-500/40 text-amber-200 bg-amber-500/10",
+      dot: "bg-amber-400",
+      mark: <IconSparkle className="w-3.5 h-3.5" />,
+    },
+    coming: {
+      wrap: "border-border bg-bg/40",
+      chip: "border-border text-muted bg-surface",
+      dot: "bg-muted/60",
+      mark: <IconCircle className="w-3.5 h-3.5" />,
+    },
+    roadmap: {
+      wrap: "border-border bg-bg/30",
+      chip: "border-border text-faint bg-surface",
+      dot: "bg-faint",
+      mark: <IconCircle className="w-3.5 h-3.5" />,
+    },
+  };
+  const p = palette[item.status];
+  const label: Record<RoadmapItem["status"], string> = {
+    live: "LIVE",
+    beta: "BETA",
+    coming: "COMING",
+    roadmap: "ROADMAP",
+  };
+
+  return (
+    <li className={`relative rounded-lg border p-4 ${p.wrap} flex flex-col gap-2`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className={`w-1.5 h-1.5 rounded-full ${p.dot}`} />
+          <span className="text-[11px] font-mono font-semibold text-ink tracking-wide">
+            {item.version}
+          </span>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${p.chip}`}
+        >
+          {p.mark}
+          {label[item.status]}
+        </span>
+      </div>
+      <div className="text-[13px] font-semibold text-ink leading-snug">
+        {item.title}
+      </div>
+      <div className="text-[11px] text-muted leading-relaxed">
+        {item.body}
+      </div>
+    </li>
   );
 }
 

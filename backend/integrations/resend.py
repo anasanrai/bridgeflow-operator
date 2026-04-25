@@ -20,7 +20,14 @@ from typing import Any
 import httpx
 
 RESEND_API = "https://api.resend.com/emails"
-FROM_ADDRESS = "BridgeFlow <hello@bridgeflow.agency>"
+FROM_FALLBACK = "BridgeFlow <onboarding@resend.dev>"
+
+
+def _from_address() -> str:
+    raw = (os.environ.get("RESEND_FROM") or "").strip()
+    if not raw:
+        return FROM_FALLBACK
+    return raw if "<" in raw else f"BridgeFlow <{raw}>"
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -136,7 +143,7 @@ async def send_immediate_emails(
                     RESEND_API,
                     headers=headers,
                     json={
-                        "from": FROM_ADDRESS,
+                        "from": _from_address(),
                         "to": [recipient],
                         "subject": subject,
                         "html": _body_as_html(body),

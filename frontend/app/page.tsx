@@ -1,26 +1,41 @@
 "use client";
 
+import { useState } from "react";
 import { ActionManifest } from "./components/ActionManifest";
 import { AgentStream } from "./components/AgentStream";
+import { AudioUpload } from "./components/AudioUpload";
 import { LeadReport } from "./components/LeadReport";
 import { TranscriptUpload } from "./components/TranscriptUpload";
-import { IconSparkle, IconTarget } from "./lib/icons";
+import { IconMic, IconPipeline, IconSparkle, IconTarget } from "./lib/icons";
 import { useAgentStream } from "./lib/useAgentStream";
+
+type Mode = "transcript" | "voice";
 
 export default function PipelinePage() {
   const pipeline = useAgentStream();
+  const [mode, setMode] = useState<Mode>("transcript");
 
   return (
     <div className="space-y-6">
       <PageHeader running={pipeline.running} callId={pipeline.callId} />
 
+      <ModeTabs mode={mode} setMode={setMode} disabled={pipeline.running} />
+
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <section className="lg:col-span-2 space-y-4">
-          <TranscriptUpload
-            running={pipeline.running}
-            onRun={pipeline.run}
-            onReset={pipeline.reset}
-          />
+          {mode === "transcript" ? (
+            <TranscriptUpload
+              running={pipeline.running}
+              onRun={pipeline.run}
+              onReset={pipeline.reset}
+            />
+          ) : (
+            <AudioUpload
+              running={pipeline.running}
+              onTranscribed={(text) => pipeline.run(text)}
+              onReset={pipeline.reset}
+            />
+          )}
 
           {pipeline.error && (
             <div className="rounded-xl border border-hot/40 bg-hot/5 p-4 text-sm text-hot">
@@ -32,7 +47,7 @@ export default function PipelinePage() {
         </section>
 
         <section className="lg:col-span-3 space-y-4">
-          {!pipeline.results && !pipeline.running && <EmptyState />}
+          {!pipeline.results && !pipeline.running && <EmptyState mode={mode} />}
           {pipeline.running && !pipeline.results && <RunningState />}
           {pipeline.results && (
             <>
@@ -42,6 +57,66 @@ export default function PipelinePage() {
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+function ModeTabs({
+  mode,
+  setMode,
+  disabled,
+}: {
+  mode: Mode;
+  setMode: (m: Mode) => void;
+  disabled: boolean;
+}) {
+  const tabs: Array<{
+    id: Mode;
+    label: string;
+    badge?: string;
+    icon: typeof IconPipeline;
+  }> = [
+    { id: "transcript", label: "Transcript", icon: IconPipeline },
+    { id: "voice", label: "Voice call", badge: "V2 Beta", icon: IconMic },
+  ];
+
+  return (
+    <div role="tablist" className="inline-flex items-center gap-1 p-1 rounded-lg border border-border bg-surface">
+      {tabs.map((t) => {
+        const active = mode === t.id;
+        const Icon = t.icon;
+        const isBeta = !!t.badge;
+        return (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={active}
+            disabled={disabled}
+            onClick={() => setMode(t.id)}
+            className={`relative inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+              active
+                ? isBeta
+                  ? "bg-amber-500/10 text-amber-200 border border-amber-500/30"
+                  : "bg-bg text-ink border border-border"
+                : "text-muted hover:text-ink border border-transparent"
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {t.label}
+            {t.badge && (
+              <span
+                className={`text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                  active
+                    ? "border-amber-500/50 text-amber-200 bg-amber-500/15"
+                    : "border-amber-500/40 text-amber-300/90 bg-amber-500/10"
+                }`}
+              >
+                {t.badge}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -80,17 +155,24 @@ function PageHeader({ running, callId }: { running: boolean; callId: string | nu
   );
 }
 
-function EmptyState() {
+function EmptyState({ mode }: { mode: Mode }) {
+  const isVoice = mode === "voice";
   return (
     <div className="rounded-xl border border-border bg-surface shadow-inset-hair p-10 text-center">
-      <div className="w-12 h-12 mx-auto rounded-xl bg-accent/10 border border-accent/30 text-accent flex items-center justify-center mb-4 shadow-glow-accent">
-        <IconTarget className="w-6 h-6" />
+      <div
+        className={`w-12 h-12 mx-auto rounded-xl flex items-center justify-center mb-4 ${
+          isVoice
+            ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
+            : "bg-accent/10 border border-accent/30 text-accent shadow-glow-accent"
+        }`}
+      >
+        {isVoice ? <IconMic className="w-6 h-6" /> : <IconTarget className="w-6 h-6" />}
       </div>
       <div className="text-sm font-semibold text-ink">No pipeline run yet</div>
       <div className="text-xs text-muted mt-2 max-w-md mx-auto leading-relaxed">
-        Paste a sales call transcript or load the demo, then run the pipeline.
-        Five Opus 4.7 agents will qualify the lead, draft a follow-up sequence,
-        plan the actions, and self-review.
+        {isVoice
+          ? "Drop an audio file on the left. We'll transcribe it with Groq Whisper and auto-run all five Opus 4.7 agents."
+          : "Paste a sales call transcript or load the demo, then run the pipeline. Five Opus 4.7 agents will qualify the lead, draft a follow-up sequence, plan the actions, and self-review."}
       </div>
     </div>
   );

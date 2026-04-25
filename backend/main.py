@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 # Load env from project root regardless of cwd
 ROOT = Path(__file__).resolve().parent.parent
@@ -36,7 +36,15 @@ from agents import (  # noqa: E402
 )
 from agents.base import extract_json, stream_agent  # noqa: E402
 from db import supabase_client  # noqa: E402
-from integrations import notify_hot_lead, send_immediate_emails  # noqa: E402
+from integrations import (  # noqa: E402
+    GROQ_ALLOWED_EXT,
+    GROQ_MAX_BYTES,
+    TranscriptionError,
+    groq_configured,
+    notify_hot_lead,
+    send_immediate_emails,
+    transcribe_bytes,
+)
 from models.schemas import AnalyzeRequest  # noqa: E402
 
 app = FastAPI(title="BridgeFlow Operator", version="0.1.0")
@@ -215,6 +223,7 @@ async def config() -> dict:
         "telegram": bool(
             os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")
         ),
+        "groq": groq_configured(),
     }
 
 
@@ -239,6 +248,31 @@ async def leads(limit: int = 100) -> dict:
     except Exception as exc:
         print(f"[supabase] /leads failed: {exc}")
         return {"source": "demo", "leads": []}
+
+
+@app.post("/transcribe")
+async def transcribe(file: UploadFile = File(...)) -> JSONResponse:
+    """V2 Beta — Groq Whisper-large-v3-turbo transcription.
+    Accepts a multipart .mp3 / .wav / .m4a upload and returns
+    `{ transcript, duration_seconds, language, model }`."""
+    if not groq_configured():
+        raise HTTPException(503, "groq_not_configured")
+
+    name = (file.filename or "audio").lower()
+    ext = "." + name.rsplit(".", 1)[-1] if "." in name else ""
+    if ext not in GROQ_ALLOWED_EXT:
+        raise HTTPException(415, f"unsupported audio type: {ext or 'unknown'}")
+
+    data = await file.read()
+    if len(data) > GROQ_MAX_BYTES:
+        raise HTTPException(413, f"file exceeds {GROQ_MAX_BYTES} bytes")
+
+    try:
+        result = await asyncio.to_thread(transcribe_bytes, name, data)
+    except TranscriptionError as exc:
+        raise HTTPException(502, f"groq: {exc}") from exc
+
+    return JSONResponse(result)
 
 
 @app.post("/analyze")

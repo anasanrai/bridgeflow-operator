@@ -206,6 +206,36 @@ export const IconKey = (p: Props) => (
   </svg>
 );
 
+export const IconMic = (p: Props) => (
+  <svg {...base} {...p}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0" />
+    <path d="M12 18v3" />
+    <path d="M9 21h6" />
+  </svg>
+);
+
+export const IconWaveform = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M3 12h2" />
+    <path d="M7 8v8" />
+    <path d="M11 5v14" />
+    <path d="M15 8v8" />
+    <path d="M19 11v2" />
+    <path d="M21 12h0" />
+  </svg>
+);
+
+export const IconRoadmap = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M4 19V7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v12" />
+    <path d="M4 19h16" />
+    <path d="M9 8h6" />
+    <path d="M9 12h6" />
+    <path d="M9 16h3" />
+  </svg>
+);
+
 export const IconTelegram = (p: Props) => (
   <svg {...base} {...p}>
     <path d="M22 3 2 10l7 3 3 7 10-17z" />

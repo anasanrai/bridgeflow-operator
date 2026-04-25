@@ -24,3 +24,6 @@ tsconfig.tsbuildinfo
 .claude-worktrees/
 .codex/
 *.log
+
+# Generated knowledge-graph artefacts
+graphify-out/
