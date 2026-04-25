@@ -76,7 +76,11 @@ export default function PipelinePage() {
               </div>
             )}
 
-            <AgentStream agents={pipeline.agents} running={pipeline.running} />
+            <AgentStream
+              agents={pipeline.agents}
+              running={pipeline.running}
+              onCancel={pipeline.reset}
+            />
           </section>
 
           <section className="lg:col-span-3 space-y-4">
