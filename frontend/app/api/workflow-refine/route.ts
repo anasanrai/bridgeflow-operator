@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -13,9 +13,17 @@ export async function POST(req: NextRequest) {
     headers: { "Content-Type": "application/json" },
     body,
   });
-  const text = await upstream.text();
-  return new Response(text, {
-    status: upstream.status,
-    headers: { "Content-Type": upstream.headers.get("content-type") || "application/json" },
+  if (!upstream.ok || !upstream.body) {
+    const text = await upstream.text().catch(() => "");
+    return new Response(text || "backend error", { status: upstream.status || 502 });
+  }
+  return new Response(upstream.body, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
   });
 }

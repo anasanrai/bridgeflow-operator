@@ -135,6 +135,80 @@ async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Pr
   return (await r.json()) as T;
 }
 
+/** SSE reader for the streamed workflow endpoints (/workflow-draft +
+ *  /workflow-refine). The backend emits `{type:'delta',...}` ticks for
+ *  liveness, then a single `{type:'done', result: {...}}` carrying the
+ *  parsed JSON. `onDelta` is optional progress hook for the UI. */
+async function streamSseResult<T>(
+  url: string,
+  body: unknown,
+  signal?: AbortSignal,
+  onDelta?: (info: { chunks: number; chars: number }) => void
+): Promise<T> {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!r.ok || !r.body) {
+    let detail: string;
+    try {
+      const j = await r.json();
+      detail = j?.detail ?? JSON.stringify(j).slice(0, 300);
+    } catch {
+      detail = (await r.text().catch(() => "")).slice(0, 300);
+    }
+    throw new Error(`${url} → HTTP ${r.status}: ${detail || "stream error"}`);
+  }
+
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: T | null = null;
+  let streamError: string | null = null;
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+
+      const dataLine = block
+        .split("\n")
+        .filter((l) => l.startsWith("data:"))
+        .map((l) => l.slice(5).trim())
+        .join("");
+      if (!dataLine) continue;
+
+      try {
+        const ev = JSON.parse(dataLine);
+        if (ev?.type === "delta") {
+          if (onDelta) onDelta({ chunks: ev.chunks ?? 0, chars: ev.chars ?? 0 });
+        } else if (ev?.type === "done") {
+          result = ev.result as T;
+        } else if (ev?.type === "error") {
+          streamError = String(ev.message ?? "stream error");
+        }
+        // start / unknown types are ignored
+      } catch {
+        // ignore malformed frames — Anthropic's SDK occasionally splits
+        // multi-byte chars across chunks; the next loop will recover.
+      }
+    }
+  }
+
+  if (streamError) throw new Error(`${url} → ${streamError}`);
+  if (!result) throw new Error(`${url} → no done event`);
+  return result;
+}
+
 export function useWorkflowGenerator() {
   const [state, setState] = useState<WorkflowState>(initialState);
   const reset = useCallback(() => setState(initialState), []);
@@ -157,8 +231,9 @@ export function useWorkflowGenerator() {
         steps: { ...s.steps, playbook: "done", workflow: "running" },
       }));
 
-      // 2. Workflow draft
-      const workflow = await postJson<N8nWorkflow>(
+      // 2. Workflow draft (streamed — Opus 4.7 generation is ~55s, would
+      // otherwise hit Railway's 60s edge-proxy idle timeout).
+      const workflow = await streamSseResult<N8nWorkflow>(
         "/api/workflow-draft",
         { playbook, pipeline: results, call_id: callId },
         ctrl.signal
@@ -214,7 +289,7 @@ export function useWorkflowGenerator() {
         }));
 
         try {
-          refinedWorkflow = await postJson<N8nWorkflow>(
+          refinedWorkflow = await streamSseResult<N8nWorkflow>(
             "/api/workflow-refine",
             {
               workflow: refinedWorkflow,

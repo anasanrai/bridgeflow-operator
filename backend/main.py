@@ -667,7 +667,7 @@ async def leads(limit: int = 100, include_archived: bool = False) -> dict:
 async def _run_json_agent(
     system: str, user: str, label: str, max_tokens: int = 4096
 ) -> dict:
-    """Helper for /playbook, /workflow-draft, /credentials, /validate-workflow.
+    """Helper for /playbook, /credentials, /validate-workflow.
     Runs an Opus 4.7 agent and returns its parsed JSON, surfacing useful
     errors to the HTTP layer."""
     try:
@@ -677,6 +677,74 @@ async def _run_json_agent(
     if not isinstance(parsed, dict):
         raise HTTPException(502, f"{label}: agent returned non-object JSON")
     return parsed
+
+
+def _streaming_json_agent(
+    system: str,
+    user: str,
+    label: str,
+    *,
+    max_tokens: int = 16384,
+    on_complete: callable | None = None,  # type: ignore[valid-type]
+) -> StreamingResponse:
+    """Used for the two heaviest workflow endpoints (/workflow-draft +
+    /workflow-refine). Opus 4.7 generation runs ~50-60s for a full n8n
+    workflow JSON, which exceeds Railway's edge-proxy idle-timeout — the
+    upstream returns 502 'Application failed to respond' if no bytes flow.
+
+    SSE-style streaming keeps the connection visibly active by emitting
+    a delta event for every text chunk Anthropic returns. Frontend reads
+    until it sees `{type: 'done', result: {...}}`, then proceeds.
+
+    `on_complete` runs after parse + before the final SSE event, so
+    callers can persist the result (e.g. workflow_drafts row insert)."""
+
+    async def event_stream():
+        yield f"data: {json.dumps({'type': 'start', 'label': label})}\n\n"
+        buf: list[str] = []
+        chunks_seen = 0
+        try:
+            async for text in stream_agent(system, user, max_tokens=max_tokens):
+                buf.append(text)
+                chunks_seen += 1
+                # Push a tiny tick every chunk so Railway's edge sees a
+                # live connection. Includes character count so the UI
+                # can show a "generating…" progress hint if it wants.
+                yield f"data: {json.dumps({'type': 'delta', 'chunks': chunks_seen, 'chars': sum(len(s) for s in buf)})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'{type(exc).__name__}: {exc}'})}\n\n"
+            return
+
+        raw = "".join(buf)
+        try:
+            parsed = extract_json(raw)
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'json_parse: {exc}'})}\n\n"
+            return
+        if not isinstance(parsed, dict):
+            yield f"data: {json.dumps({'type': 'error', 'message': 'agent returned non-object JSON'})}\n\n"
+            return
+
+        # Persist + any other side-effects before announcing done.
+        if on_complete is not None:
+            try:
+                on_complete(parsed)
+            except Exception as exc:
+                # Non-fatal — log and continue. The user still gets the
+                # generated workflow even if our DB insert fumbles.
+                print(f"[stream] on_complete({label}) failed: {exc}")
+
+        yield f"data: {json.dumps({'type': 'done', 'result': parsed})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.post("/playbook")
@@ -693,51 +761,69 @@ async def playbook(req: PlaybookRequest) -> JSONResponse:
 
 
 @app.post("/workflow-draft")
-async def workflow_draft(req: WorkflowDraftRequest) -> JSONResponse:
-    """V2 — Opus 4.7 generates a production n8n workflow JSON from the playbook."""
-    out = await _run_json_agent(
+async def workflow_draft(req: WorkflowDraftRequest) -> StreamingResponse:
+    """V2 — Opus 4.7 generates a production n8n workflow JSON from the
+    playbook. Streamed (SSE) because full generation runs ~55s and would
+    otherwise hit Railway's edge-proxy idle timeout."""
+
+    def persist(parsed: dict) -> None:
+        if req.call_id:
+            supabase_client.insert_workflow_draft(
+                req.call_id, req.playbook, parsed, None, None, platform="n8n"
+            )
+
+    return _streaming_json_agent(
         WORKFLOW_DRAFT_SYSTEM,
         build_workflow_draft_user(req.playbook, req.pipeline),
         "workflow_draft",
         max_tokens=16384,  # full n8n workflows are 8-12K JSON tokens
+        on_complete=persist,
     )
-    if req.call_id:
-        # New row each time; keeps a draft history per call.
-        supabase_client.insert_workflow_draft(
-            req.call_id, req.playbook, out, None, None, platform="n8n"
-        )
-    return JSONResponse(out)
 
 
 @app.post("/workflow-refine")
-async def workflow_refine(req: WorkflowRefineRequest) -> JSONResponse:
-    """V2 self-correcting loop. Takes the previous workflow + validator
-    issues, returns a corrected workflow JSON that applies the suggested
-    fixes verbatim (no redesign). Capped at 2 passes server-side via the
-    pass_number field — calls beyond pass 2 are rejected so we don't
-    accidentally infinite-loop on a stubborn workflow."""
+async def workflow_refine(req: WorkflowRefineRequest):
+    """V2 self-correcting loop. Streamed (SSE) like /workflow-draft to
+    survive Railway's edge proxy. Capped at 2 passes server-side via
+    pass_number; calls beyond pass 2 are rejected so we don't infinite-loop
+    on a stubborn workflow. When there are no issues, returns the workflow
+    unchanged as a one-shot SSE 'done' event."""
     if req.pass_number > 2:
         raise HTTPException(429, "max_refinement_passes_exceeded")
+
     if not req.issues:
-        # Nothing to fix — return the workflow unchanged so the frontend
-        # can fall through cleanly.
-        return JSONResponse(req.workflow)
-    out = await _run_json_agent(
+        # Nothing to fix — emit a synthetic done event so the frontend's
+        # SSE reader gets the same shape it expects.
+        unchanged = req.workflow
+
+        async def passthrough():
+            yield f"data: {json.dumps({'type': 'start', 'label': 'workflow_refine_noop'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'result': unchanged})}\n\n"
+
+        return StreamingResponse(
+            passthrough(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    def persist(parsed: dict) -> None:
+        if req.call_id:
+            supabase_client.insert_workflow_draft(
+                req.call_id,
+                None,
+                parsed,
+                None,
+                None,
+                platform=f"n8n (refined pass {req.pass_number})",
+            )
+
+    return _streaming_json_agent(
         WORKFLOW_REFINE_SYSTEM,
         build_workflow_refine_user(req.workflow, req.issues),
         f"workflow_refine pass {req.pass_number}",
         max_tokens=16384,
+        on_complete=persist,
     )
-    if req.call_id:
-        supabase_client.insert_workflow_draft(
-            req.call_id,
-            None,
-            out,
-            None,
-            None,
-            platform=f"n8n (refined pass {req.pass_number})",
-        )
-    return JSONResponse(out)
 
 
 @app.post("/credentials")
