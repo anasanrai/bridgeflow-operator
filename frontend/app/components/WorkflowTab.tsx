@@ -69,6 +69,8 @@ export function WorkflowTab({ results, pipelineId }: Props) {
         </div>
       )}
 
+      <WorkflowPreviewCard workflow={wf.workflow} status={wf.steps.workflow} />
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <PlaybookCard playbook={wf.playbook} status={wf.steps.playbook} />
         <CredentialsCard
@@ -76,8 +78,6 @@ export function WorkflowTab({ results, pipelineId }: Props) {
           status={wf.steps.credentials}
         />
       </div>
-
-      <WorkflowPreviewCard workflow={wf.workflow} status={wf.steps.workflow} />
 
       <WorkflowJsonCard
         workflow={wf.workflow}
@@ -420,14 +420,14 @@ function WorkflowPreviewCard({
       bodyClassName="p-0"
     >
       {workflow && (
-        <div className="h-[560px] bg-[#0a0a0c] border-t border-border">
+        <div className="h-[640px] bg-[#0a0a0c] border-t border-border">
           <ReactFlow
             nodes={nodes}
             edges={edges}
             nodeTypes={NODE_TYPES}
             fitView
-            fitViewOptions={{ padding: 0.06, minZoom: 0.4, maxZoom: 1.4 }}
-            minZoom={0.25}
+            fitViewOptions={{ padding: 0.12, minZoom: 0.55, maxZoom: 1.25 }}
+            minZoom={0.3}
             maxZoom={2}
             nodesDraggable={false}
             nodesConnectable={false}
@@ -464,6 +464,7 @@ function WorkflowPreviewCard({
                   : "#3f3f46"
               }
               nodeStrokeColor="transparent"
+              style={{ width: 160, height: 96 }}
               className="!bg-[#15151a] !border !border-[#26262b] !rounded-md"
             />
           </ReactFlow>
@@ -507,14 +508,16 @@ interface SubNodeData {
   attach: SubPort["type"];
 }
 
-function nodeKind(type: string): NodeKind {
+function nodeKind(type: string, hasIncoming: boolean): NodeKind {
   if (/stickyNote/i.test(type)) return "note";
   if (SUB_NODE_PATTERNS.test(type)) return "sub";
-  if (TRIGGER_PATTERNS.test(type)) return "trigger";
+  if (/\.wait$/i.test(type)) return "wait";
+  // Trigger only when used as one — i.e. no inbound main edges.
+  // Otherwise scheduleTrigger inline is treated as a "wait" node.
+  if (TRIGGER_PATTERNS.test(type)) return hasIncoming ? "wait" : "trigger";
   if (/langchain\.agent/i.test(type)) return "agent";
   if (BRANCH_PATTERNS.test(type)) return "branch";
   if (/\.merge$/i.test(type)) return "merge";
-  if (/\.wait$/i.test(type) || /scheduleTrigger/i.test(type)) return "wait";
   if (/emailSend|httpRequest|telegram|slack|googleCalendar|gmail|hubspot|airtable|notion|sheets/i.test(type)) return "action";
   return "transform";
 }
@@ -526,15 +529,23 @@ interface ServiceTheme {
   glyph: React.ReactNode;
 }
 
-function serviceTheme(type: string, name: string): ServiceTheme {
-  const t = type.toLowerCase();
-  const n = name.toLowerCase();
+function serviceTheme(type: string, name: string, kind?: NodeKind): ServiceTheme {
+  // All regexes use /i so the camelCase n8n type strings match cleanly.
+  const t = type;
+  const n = name;
+
+  // Wait first — beats trigger when the node is mid-flow.
+  if (kind === "wait" || /\.wait$/i.test(t))
+    return { label: "Wait", iconBg: "bg-amber-500/15", iconFg: "text-amber-300", glyph: <IconClock className="w-4 h-4" /> };
 
   // Triggers
-  if (/webhook|formTrigger/.test(t))
-    return { label: "Trigger", iconBg: "bg-accent/15", iconFg: "text-accent", glyph: <BoltGlyph className="w-4 h-4" /> };
-  if (/scheduleTrigger|cron/i.test(t))
-    return { label: "Schedule", iconBg: "bg-accent/15", iconFg: "text-accent", glyph: <IconClock className="w-4 h-4" /> };
+  if (kind === "trigger") {
+    if (/scheduleTrigger|cron/i.test(t))
+      return { label: "Schedule", iconBg: "bg-accent/15", iconFg: "text-accent", glyph: <IconClock className="w-4 h-4" /> };
+    if (/formTrigger/i.test(t))
+      return { label: "Form trigger", iconBg: "bg-accent/15", iconFg: "text-accent", glyph: <BoltGlyph className="w-4 h-4" /> };
+    return { label: "Webhook", iconBg: "bg-accent/15", iconFg: "text-accent", glyph: <BoltGlyph className="w-4 h-4" /> };
+  }
 
   // Branch / merge
   if (BRANCH_PATTERNS.test(t))
@@ -542,50 +553,48 @@ function serviceTheme(type: string, name: string): ServiceTheme {
   if (/\.merge$/i.test(t))
     return { label: "Merge", iconBg: "bg-cold/15", iconFg: "text-cold", glyph: <MergeGlyph className="w-4 h-4" /> };
 
-  // Wait
-  if (/\.wait$/i.test(t) || (/scheduleTrigger/i.test(t) && /wait/.test(n)))
-    return { label: "Wait", iconBg: "bg-amber-500/15", iconFg: "text-amber-300", glyph: <IconClock className="w-4 h-4" /> };
-
   // Agent
-  if (/langchain\.agent/.test(t))
+  if (/langchain\.agent/i.test(t))
     return { label: "AI Agent", iconBg: "bg-white/[0.08]", iconFg: "text-white", glyph: <RobotGlyph className="w-4 h-4" /> };
 
-  // Sub-nodes (langchain)
-  if (/lmChatAnthropic/.test(t))
-    return { label: "Anthropic", iconBg: "bg-[#cc785c]/20", iconFg: "text-[#e6b89c]", glyph: <span className="font-bold text-[12px] tracking-tight">A\\</span> };
-  if (/lmChatOpenAi/i.test(t))
-    return { label: "OpenAI", iconBg: "bg-emerald-500/20", iconFg: "text-emerald-300", glyph: <span className="font-bold text-[11px]">OAI</span> };
-  if (/lmChatGoogle/i.test(t) || /gemini/i.test(t))
-    return { label: "Gemini", iconBg: "bg-blue-500/20", iconFg: "text-blue-300", glyph: <span className="font-bold text-[10px]">G</span> };
-  if (/memoryBuffer|memoryWindow/i.test(t))
-    return { label: "Memory", iconBg: "bg-cold/20", iconFg: "text-cold", glyph: <span className="font-bold text-[10px]">M</span> };
+  // Sub-nodes (langchain) — kept LM/Memory/Tool tighter, brand-colored.
+  if (/lmChat.*Anthropic|claude/i.test(t) || /anthropic/i.test(n))
+    return { label: "Anthropic", iconBg: "bg-[#cc785c]/25", iconFg: "text-[#e6b89c]", glyph: <span className="font-bold text-[13px] leading-none">A</span> };
+  if (/lmChat.*OpenAi|openai|gpt/i.test(t) || /openai|gpt/i.test(n))
+    return { label: "OpenAI", iconBg: "bg-emerald-500/20", iconFg: "text-emerald-300", glyph: <span className="font-bold text-[11px] leading-none">AI</span> };
+  if (/lmChat.*Google|gemini/i.test(t) || /gemini/i.test(n))
+    return { label: "Gemini", iconBg: "bg-blue-500/20", iconFg: "text-blue-300", glyph: <span className="font-bold text-[12px] leading-none">G</span> };
+  if (/memoryBuffer|memoryWindow|memoryRedis|memoryPostgres/i.test(t))
+    return { label: "Memory", iconBg: "bg-cold/20", iconFg: "text-cold", glyph: <span className="font-bold text-[11px] leading-none">M</span> };
   if (/vectorStore/i.test(t))
-    return { label: "Vector", iconBg: "bg-cold/20", iconFg: "text-cold", glyph: <span className="font-bold text-[10px]">V</span> };
+    return { label: "Vector", iconBg: "bg-cold/20", iconFg: "text-cold", glyph: <span className="font-bold text-[11px] leading-none">V</span> };
   if (/outputParser/i.test(t))
-    return { label: "Parser", iconBg: "bg-amber-500/20", iconFg: "text-amber-300", glyph: <span className="font-bold text-[10px]">{"{}"}</span> };
+    return { label: "Parser", iconBg: "bg-amber-500/20", iconFg: "text-amber-300", glyph: <span className="font-mono font-bold text-[10px] leading-none">{"{}"}</span> };
   if (/tool/i.test(t))
-    return { label: "Tool", iconBg: "bg-amber-500/20", iconFg: "text-amber-300", glyph: <span className="font-bold text-[10px]">T</span> };
+    return { label: "Tool", iconBg: "bg-amber-500/20", iconFg: "text-amber-300", glyph: <span className="font-bold text-[11px] leading-none">T</span> };
 
-  // Actions — branded
-  if (/telegram/.test(t))
+  // Actions — branded chips
+  if (/telegram/i.test(t))
     return { label: "Telegram", iconBg: "bg-[#26a5e4]/15", iconFg: "text-[#26a5e4]", glyph: <IconTelegram className="w-4 h-4" /> };
-  if (/slack/.test(t))
+  if (/slack/i.test(t))
     return { label: "Slack", iconBg: "bg-[#4a154b]/25", iconFg: "text-[#ecb22e]", glyph: <SlackGlyph className="w-4 h-4" /> };
   if (/googleCalendar|calendar/i.test(t))
     return { label: "Calendar", iconBg: "bg-[#4285f4]/20", iconFg: "text-[#8ab4f8]", glyph: <IconCalendar className="w-4 h-4" /> };
   if (/emailSend|gmail/i.test(t))
     return { label: "Email", iconBg: "bg-cold/15", iconFg: "text-cold", glyph: <IconMail className="w-4 h-4" /> };
   if (/httpRequest/i.test(t)) {
-    if (/resend/.test(n))
+    if (/resend/i.test(n))
       return { label: "Resend", iconBg: "bg-white/[0.08]", iconFg: "text-white", glyph: <IconMail className="w-4 h-4" /> };
+    if (/telegram/i.test(n))
+      return { label: "Telegram", iconBg: "bg-[#26a5e4]/15", iconFg: "text-[#26a5e4]", glyph: <IconTelegram className="w-4 h-4" /> };
     return { label: "HTTP", iconBg: "bg-cold/15", iconFg: "text-cold", glyph: <IconSend className="w-4 h-4" /> };
   }
 
   // Transforms
   if (/\.set$/i.test(t))
-    return { label: "Set", iconBg: "bg-white/[0.06]", iconFg: "text-ink-muted", glyph: <span className="font-mono font-bold text-[10px]">{"{}"}</span> };
+    return { label: "Set", iconBg: "bg-white/[0.06]", iconFg: "text-ink-muted", glyph: <span className="font-mono font-bold text-[10px] leading-none">{"{ }"}</span> };
   if (/code|function/i.test(t))
-    return { label: "Code", iconBg: "bg-white/[0.06]", iconFg: "text-ink-muted", glyph: <span className="font-mono font-bold text-[10px]">{"</>"}</span> };
+    return { label: "Code", iconBg: "bg-white/[0.06]", iconFg: "text-ink-muted", glyph: <span className="font-mono font-bold text-[10px] leading-none">{"</>"}</span> };
   if (/archive/i.test(n))
     return { label: "Archive", iconBg: "bg-white/[0.06]", iconFg: "text-ink-muted", glyph: <IconArchive className="w-4 h-4" /> };
   if (/stickyNote/i.test(t))
@@ -603,7 +612,7 @@ function subAttachType(type: string): SubPort["type"] {
 // ── Custom node renderers ────────────────────────────────────────────────
 
 function MainNode({ data }: NodeProps<MainNodeData>) {
-  const t = serviceTheme(data.type, data.name);
+  const t = serviceTheme(data.type, data.name, data.kind);
   const isTrigger = data.kind === "trigger";
   const branches = data.branches ?? [];
 
@@ -664,18 +673,33 @@ function MainNode({ data }: NodeProps<MainNodeData>) {
         </div>
       )}
 
-      {/* Branch labels for switch/if */}
+      {/* Branch labels for switch/if — chip + handle pair stacked tightly */}
       {branches.length > 0 ? (
         <>
-          {branches.map((label, i) => (
-            <div
-              key={`${label}-${i}`}
-              className="absolute -right-7 text-[10px] font-mono text-ink-muted/80"
-              style={{ top: `${30 + i * 22}px` }}
-            >
-              {label}
-            </div>
-          ))}
+          {branches.map((label, i) => {
+            const top = 14 + i * 18;
+            const tone =
+              /hot/i.test(label)
+                ? "border-hot/45 text-hot bg-hot/10"
+                : /warm/i.test(label)
+                ? "border-warm/45 text-warm bg-warm/10"
+                : /cold/i.test(label)
+                ? "border-cold/45 text-cold bg-cold/10"
+                : /^true$/i.test(label)
+                ? "border-accent/45 text-accent bg-accent/10"
+                : /^false$/i.test(label)
+                ? "border-faint/60 text-faint bg-bg"
+                : "border-border text-ink-muted bg-bg";
+            return (
+              <span
+                key={`chip-${label}-${i}`}
+                className={`absolute -right-1 translate-x-full text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border whitespace-nowrap ${tone}`}
+                style={{ top, marginLeft: 6 }}
+              >
+                {label}
+              </span>
+            );
+          })}
           {branches.map((label, i) => (
             <Handle
               key={`h-${label}-${i}`}
@@ -683,7 +707,7 @@ function MainNode({ data }: NodeProps<MainNodeData>) {
               position={Position.Right}
               id={`branch:${label}`}
               className="!w-2 !h-2 !bg-[#52525b] !border-0"
-              style={{ top: `${36 + i * 22}px` }}
+              style={{ top: `${20 + i * 18}px` }}
             />
           ))}
         </>
@@ -699,7 +723,7 @@ function MainNode({ data }: NodeProps<MainNodeData>) {
 }
 
 function SubNode({ data }: NodeProps<SubNodeData>) {
-  const t = serviceTheme(data.type, data.name);
+  const t = serviceTheme(data.type, data.name, "sub");
   return (
     <div className="relative flex flex-col items-center gap-1.5">
       <Handle
@@ -709,12 +733,12 @@ function SubNode({ data }: NodeProps<SubNodeData>) {
         style={{ transform: "rotate(45deg)" }}
       />
       <div
-        className={`w-12 h-12 rounded-full bg-[#15151a] border border-[#26262b] flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.6)] ${t.iconFg}`}
+        className={`w-11 h-11 rounded-full bg-[#15151a] border border-[#26262b] flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.6)] ${t.iconBg} ${t.iconFg}`}
       >
         {t.glyph}
       </div>
-      <div className="text-center max-w-[120px]">
-        <div className="text-[11px] text-white leading-tight">{data.name}</div>
+      <div className="text-center max-w-[110px]">
+        <div className="text-[10.5px] text-white leading-tight truncate">{data.name}</div>
         <div className="text-[9px] font-mono uppercase tracking-wider text-ink-muted/60 mt-0.5">
           {t.label}
         </div>
@@ -744,14 +768,28 @@ const NODE_TYPES = {
 
 // ── Layout + edge synthesis ──────────────────────────────────────────────
 
-const COL_W = 280;
-const MAIN_ROW_H = 130;
-const SUB_ROW_OFFSET = 130;
-const SUB_COL_W = 130;
+const COL_W = 290;
+const MAIN_ROW_H = 120;
+const SUB_ROW_OFFSET = 95;
+const SUB_COL_W = 110;
 
 function toReactFlow(wf: N8nWorkflow): { nodes: Node[]; edges: Edge[] } {
+  // Pre-compute incoming-edge counts so we can correctly classify
+  // scheduleTrigger nodes used inline as "wait" instead of "trigger".
+  const incoming = new Map<string, number>();
+  wf.nodes.forEach((n) => incoming.set(n.name, 0));
+  Object.entries(wf.connections ?? {}).forEach(([, c]) =>
+    (c.main ?? []).forEach((arr) =>
+      arr.forEach((edge) =>
+        incoming.set(edge.node, (incoming.get(edge.node) ?? 0) + 1)
+      )
+    )
+  );
+
   const kinds = new Map<string, NodeKind>();
-  wf.nodes.forEach((n) => kinds.set(n.name, nodeKind(n.type)));
+  wf.nodes.forEach((n) =>
+    kinds.set(n.name, nodeKind(n.type, (incoming.get(n.name) ?? 0) > 0))
+  );
 
   // Split sub-nodes from the main flow.
   const mainNodes = wf.nodes.filter((n) => kinds.get(n.name) !== "sub" && kinds.get(n.name) !== "note");
@@ -846,12 +884,18 @@ function toReactFlow(wf: N8nWorkflow): { nodes: Node[]; edges: Edge[] } {
     });
   });
 
-  // Notes: place top-left of canvas as a floating annotation.
+  // Notes: tuck above the trigger column so they don't overlap any node.
+  // Compute the top of the main flow's leftmost column and float the
+  // sticky there with a clear margin.
+  const mainXs = Array.from(layout.values()).map((p) => p.x);
+  const mainYs = Array.from(layout.values()).map((p) => p.y);
+  const minX = mainXs.length ? Math.min(...mainXs) : 0;
+  const minY = mainYs.length ? Math.min(...mainYs) : 0;
   noteNodes.forEach((n, i) => {
     rfNodes.push({
       id: n.name,
       type: "n8nNote",
-      position: { x: -40, y: -100 - i * 80 },
+      position: { x: minX, y: minY - 120 - i * 70 },
       draggable: false,
       data: {
         kind: "note",
@@ -1092,6 +1136,7 @@ function WorkflowJsonCard({
 }) {
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
   const json = useMemo(() => (workflow ? JSON.stringify(workflow, null, 2) : ""), [workflow]);
 
   const copyAll = async () => {
@@ -1159,20 +1204,20 @@ function WorkflowJsonCard({
             </button>
             <button
               onClick={downloadJson}
-              className="inline-flex items-center gap-1 text-[11px] font-mono px-2.5 py-1 rounded-md border border-border bg-bg text-ink-muted hover:text-ink hover:bg-surface-2 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-md border border-amber-500/40 bg-amber-500/[0.06] text-amber-200 hover:bg-amber-500/[0.12] transition-colors cursor-pointer"
             >
               <IconDownload className="w-3 h-3" />
               Download JSON
             </button>
             <button
               onClick={copyAll}
-              className={`text-[11px] font-mono px-2.5 py-1 rounded-md border transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 text-[11px] font-mono font-semibold px-3 py-1 rounded-md border transition-colors cursor-pointer ${
                 copied
-                  ? "border-accent/40 bg-accent/10 text-accent"
-                  : "border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/15"
+                  ? "border-accent/45 bg-accent/15 text-accent"
+                  : "border-amber-500/55 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25"
               }`}
             >
-              {copied ? "copied to clipboard" : "Copy to Clipboard"}
+              {copied ? "copied" : "Copy to Clipboard"}
             </button>
           </div>
         )
@@ -1184,9 +1229,30 @@ function WorkflowJsonCard({
             validation={validation}
             status={validationStatus}
           />
-          <pre className="text-[11px] leading-relaxed font-mono text-ink-muted bg-bg/40 border-t border-border p-4 max-h-[420px] overflow-auto scrollbar-thin">
-            <Highlight code={json} />
-          </pre>
+          <button
+            onClick={() => setShowRaw((r) => !r)}
+            className="w-full flex items-center justify-between gap-2 px-4 py-2.5 border-t border-border bg-bg/30 hover:bg-bg/50 transition-colors cursor-pointer"
+          >
+            <span className="text-[11px] font-mono uppercase tracking-wider text-faint">
+              Raw JSON
+            </span>
+            <span className="flex items-center gap-2 text-[11px] font-mono text-muted">
+              <span>
+                {workflow.nodes.length} nodes ·{" "}
+                {Object.values(workflow.connections ?? {}).reduce(
+                  (n, c) => n + (c.main?.reduce((m, arr) => m + arr.length, 0) ?? 0),
+                  0
+                )}{" "}
+                connections · {(json.length / 1024).toFixed(1)} KB
+              </span>
+              <span className="text-ink-muted">{showRaw ? "hide ▴" : "show ▾"}</span>
+            </span>
+          </button>
+          {showRaw && (
+            <pre className="text-[11px] leading-relaxed font-mono text-ink-muted bg-bg/40 border-t border-border p-4 max-h-[440px] overflow-auto scrollbar-thin">
+              <Highlight code={json} />
+            </pre>
+          )}
           {toast && (
             <div className="fixed bottom-6 right-6 z-50 rounded-md border border-amber-500/45 bg-bg/95 backdrop-blur text-amber-200 text-[12px] font-mono px-3 py-2 shadow-glow-accent animate-fade-in-up">
               {toast}
@@ -1205,6 +1271,12 @@ function ValidationBlock({
   validation: ValidationResponse | null;
   status: StepStatus;
 }) {
+  const [expandedSev, setExpandedSev] = useState<Record<string, boolean>>({
+    blocker: true,
+    warning: false,
+    info: false,
+  });
+
   if (status === "running") {
     return (
       <div className="px-4 py-3 border-t border-border text-[11px] font-mono text-amber-200 flex items-center gap-2">
@@ -1214,11 +1286,45 @@ function ValidationBlock({
     );
   }
   if (!validation) return null;
+
   const cls = {
     safe_to_import: "border-accent/40 bg-accent/[0.05]",
     draft_ready: "border-amber-500/45 bg-amber-500/[0.05]",
     missing_inputs: "border-hot/40 bg-hot/5",
   }[validation.status];
+
+  // Group issues by severity for a compact summary line + per-severity expand.
+  const grouped: Record<"blocker" | "warning" | "info", typeof validation.issues> = {
+    blocker: [],
+    warning: [],
+    info: [],
+  };
+  validation.issues.forEach((i) => grouped[i.severity]?.push(i));
+
+  const sevMeta: Record<
+    "blocker" | "warning" | "info",
+    { label: string; cls: string; chip: string }
+  > = {
+    blocker: {
+      label: "blockers",
+      cls: "text-hot",
+      chip: "border-hot/45 bg-hot/10 text-hot",
+    },
+    warning: {
+      label: "warnings",
+      cls: "text-warm",
+      chip: "border-warm/45 bg-warm/10 text-warm",
+    },
+    info: {
+      label: "info",
+      cls: "text-faint",
+      chip: "border-border bg-bg text-muted",
+    },
+  };
+
+  const toggle = (sev: string) =>
+    setExpandedSev((s) => ({ ...s, [sev]: !s[sev] }));
+
   return (
     <div className={`border-t ${cls} px-4 py-3`}>
       <div className="flex items-center gap-2 flex-wrap">
@@ -1226,34 +1332,45 @@ function ValidationBlock({
         <span className="text-[11px] font-mono text-muted">
           ready_to_copy: {String(validation.ready_to_copy)}
         </span>
+        {(["blocker", "warning", "info"] as const).map((sev) =>
+          grouped[sev].length > 0 ? (
+            <button
+              key={sev}
+              onClick={() => toggle(sev)}
+              className={`inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border cursor-pointer ${sevMeta[sev].chip}`}
+            >
+              <span className="font-bold tabular-nums">{grouped[sev].length}</span>
+              {sevMeta[sev].label}
+              <span className="opacity-70">
+                {expandedSev[sev] ? "▴" : "▾"}
+              </span>
+            </button>
+          ) : null
+        )}
       </div>
       <p className="mt-1.5 text-[12px] text-ink-muted leading-relaxed">
         {validation.summary}
       </p>
-      {validation.issues.length > 0 && (
-        <ul className="mt-2 space-y-1.5">
-          {validation.issues.map((i, idx) => (
-            <li
-              key={`${i.node}-${idx}`}
-              className="text-[11px] font-mono leading-relaxed text-ink-muted"
-            >
-              <span
-                className={`inline-block w-12 mr-2 text-[10px] uppercase tracking-wider ${
-                  i.severity === "blocker"
-                    ? "text-hot"
-                    : i.severity === "warning"
-                    ? "text-warm"
-                    : "text-faint"
-                }`}
+
+      {(["blocker", "warning", "info"] as const).map((sev) => {
+        if (!expandedSev[sev] || grouped[sev].length === 0) return null;
+        return (
+          <ul key={sev} className="mt-2 space-y-1.5">
+            {grouped[sev].map((i, idx) => (
+              <li
+                key={`${sev}-${i.node}-${idx}`}
+                className="text-[11px] font-mono leading-relaxed text-ink-muted"
               >
-                {i.severity}
-              </span>
-              <span className="text-ink">{i.node}:</span> {i.message}
-              <div className="ml-14 text-faint">→ {i.fix}</div>
-            </li>
-          ))}
-        </ul>
-      )}
+                <span className={`inline-block w-14 mr-2 text-[10px] uppercase tracking-wider ${sevMeta[sev].cls}`}>
+                  {sev}
+                </span>
+                <span className="text-ink">{i.node}:</span> {i.message}
+                <div className="ml-16 text-faint">→ {i.fix}</div>
+              </li>
+            ))}
+          </ul>
+        );
+      })}
     </div>
   );
 }
