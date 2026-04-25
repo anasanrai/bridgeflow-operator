@@ -3,22 +3,35 @@
 import { useEffect, useMemo, useState } from "react";
 import ReactFlow, {
   Background,
+  BackgroundVariant,
   Controls,
   Edge,
+  Handle,
   MarkerType,
+  MiniMap,
   Node,
+  NodeProps,
   Position,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import {
+  IconArchive,
+  IconCalendar,
   IconCheck,
+  IconChevron,
+  IconClock,
+  IconDot,
   IconDownload,
   IconKey,
   IconLock,
+  IconMail,
   IconPlay,
   IconRefresh,
+  IconRoadmap,
+  IconSend,
   IconSparkle,
   IconTarget,
+  IconTelegram,
   IconX,
 } from "../lib/icons";
 import { PipelineResults } from "../lib/types";
@@ -373,7 +386,7 @@ function CredentialRow({ cred }: { cred: CredentialItem }) {
   );
 }
 
-// ── 3. Workflow preview (React Flow) ─────────────────────────────────────
+// ── 3. Workflow preview (n8n-styled React Flow) ──────────────────────────
 
 function WorkflowPreviewCard({
   workflow,
@@ -399,7 +412,7 @@ function WorkflowPreviewCard({
                 0
               )
             } connections`
-          : "Visual node graph rendered with React Flow."
+          : "Visual node graph rendered with React Flow, n8n-style."
       }
       icon={<IconSparkle className="w-4 h-4" />}
       status={status}
@@ -407,27 +420,51 @@ function WorkflowPreviewCard({
       bodyClassName="p-0"
     >
       {workflow && (
-        <div className="h-[480px] bg-bg/40 border-t border-border">
+        <div className="h-[560px] bg-[#0a0a0c] border-t border-border">
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            nodeTypes={NODE_TYPES}
             fitView
-            fitViewOptions={{ padding: 0.15 }}
+            fitViewOptions={{ padding: 0.06, minZoom: 0.4, maxZoom: 1.4 }}
+            minZoom={0.25}
+            maxZoom={2}
             nodesDraggable={false}
             nodesConnectable={false}
             elementsSelectable={false}
             proOptions={{ hideAttribution: true }}
             defaultEdgeOptions={{
               type: "smoothstep",
-              animated: true,
-              style: { stroke: "rgba(245,158,11,0.55)", strokeWidth: 1.4 },
-              markerEnd: { type: MarkerType.ArrowClosed, color: "rgba(245,158,11,0.8)" },
+              animated: false,
+              style: { stroke: "rgba(255,255,255,0.32)", strokeWidth: 1.6 },
+              markerEnd: { type: MarkerType.ArrowClosed, color: "rgba(255,255,255,0.45)" },
             }}
           >
-            <Background gap={18} color="rgba(255,255,255,0.05)" />
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={20}
+              size={1.2}
+              color="rgba(255,255,255,0.07)"
+            />
             <Controls
               showInteractive={false}
-              className="!bg-surface !border !border-border !rounded-md !shadow-none [&_button]:!bg-surface [&_button]:!border-b [&_button]:!border-border [&_button:last-child]:!border-b-0 [&_button:hover]:!bg-bg [&_svg]:!fill-ink-muted"
+              className="!bg-[#15151a] !border !border-[#26262b] !rounded-md !shadow-none [&_button]:!bg-[#15151a] [&_button]:!border-b [&_button]:!border-[#26262b] [&_button:last-child]:!border-b-0 [&_button:hover]:!bg-[#1c1c22] [&_svg]:!fill-ink-muted"
+            />
+            <MiniMap
+              pannable
+              zoomable
+              maskColor="rgba(0,0,0,0.55)"
+              nodeColor={(n) =>
+                (n.data as any)?.kind === "trigger"
+                  ? "#00d4aa"
+                  : (n.data as any)?.kind === "branch"
+                  ? "#22c55e"
+                  : (n.data as any)?.kind === "sub"
+                  ? "#52525b"
+                  : "#3f3f46"
+              }
+              nodeStrokeColor="transparent"
+              className="!bg-[#15151a] !border !border-[#26262b] !rounded-md"
             />
           </ReactFlow>
         </div>
@@ -436,117 +473,475 @@ function WorkflowPreviewCard({
   );
 }
 
-const NODE_PALETTE: Array<{ match: RegExp; cls: string; label: string }> = [
-  { match: /webhook|scheduleTrigger/, cls: "border-accent/45 bg-accent/[0.08] text-accent", label: "trigger" },
-  { match: /langchain\.agent|langchain\.lmChat/, cls: "border-amber-500/45 bg-amber-500/[0.08] text-amber-200", label: "ai" },
-  { match: /switch|if|merge/, cls: "border-warm/40 bg-warm/[0.08] text-warm", label: "logic" },
-  { match: /emailSend|httpRequest|telegram|googleCalendar|slack/, cls: "border-cold/45 bg-cold/[0.08] text-cold", label: "action" },
-  { match: /set|stickyNote|wait|code/, cls: "border-border bg-surface text-ink-muted", label: "transform" },
-];
+// ── n8n node taxonomy + service icons ───────────────────────────────────
 
-function nodeClass(type: string): string {
-  for (const p of NODE_PALETTE) if (p.match.test(type)) return p.cls;
-  return "border-border bg-surface text-ink-muted";
+const SUB_NODE_PATTERNS =
+  /lmChat|embeddings|memoryBuffer|memoryWindow|vectorStore|outputParser|toolWorkflow|toolHttpRequest|toolCode|toolCalculator|toolVectorStore/i;
+
+const TRIGGER_PATTERNS = /webhook|cronTrigger|scheduleTrigger|formTrigger|manualTrigger|emailReadImap/i;
+
+const BRANCH_PATTERNS = /\.(if|switch)$/i;
+
+type NodeKind = "trigger" | "agent" | "branch" | "wait" | "merge" | "action" | "transform" | "sub" | "note";
+
+interface SubPort {
+  name: string;
+  type: "Chat Model" | "Memory" | "Tool";
+}
+
+interface MainNodeData {
+  kind: NodeKind;
+  name: string;
+  type: string;
+  service: string;
+  subtitle?: string;
+  ports?: SubPort[];   // sub-node attachment points (only on agents)
+  branches?: string[]; // multi-output labels (e.g. HOT/WARM/COLD on Switch)
+}
+
+interface SubNodeData {
+  kind: "sub";
+  name: string;
+  type: string;
+  service: string;
+  attach: SubPort["type"];
+}
+
+function nodeKind(type: string): NodeKind {
+  if (/stickyNote/i.test(type)) return "note";
+  if (SUB_NODE_PATTERNS.test(type)) return "sub";
+  if (TRIGGER_PATTERNS.test(type)) return "trigger";
+  if (/langchain\.agent/i.test(type)) return "agent";
+  if (BRANCH_PATTERNS.test(type)) return "branch";
+  if (/\.merge$/i.test(type)) return "merge";
+  if (/\.wait$/i.test(type) || /scheduleTrigger/i.test(type)) return "wait";
+  if (/emailSend|httpRequest|telegram|slack|googleCalendar|gmail|hubspot|airtable|notion|sheets/i.test(type)) return "action";
+  return "transform";
+}
+
+interface ServiceTheme {
+  label: string;
+  iconBg: string;
+  iconFg: string;
+  glyph: React.ReactNode;
+}
+
+function serviceTheme(type: string, name: string): ServiceTheme {
+  const t = type.toLowerCase();
+  const n = name.toLowerCase();
+
+  // Triggers
+  if (/webhook|formTrigger/.test(t))
+    return { label: "Trigger", iconBg: "bg-accent/15", iconFg: "text-accent", glyph: <BoltGlyph className="w-4 h-4" /> };
+  if (/scheduleTrigger|cron/i.test(t))
+    return { label: "Schedule", iconBg: "bg-accent/15", iconFg: "text-accent", glyph: <IconClock className="w-4 h-4" /> };
+
+  // Branch / merge
+  if (BRANCH_PATTERNS.test(t))
+    return { label: "Switch", iconBg: "bg-emerald-500/15", iconFg: "text-emerald-400", glyph: <SignpostGlyph className="w-4 h-4" /> };
+  if (/\.merge$/i.test(t))
+    return { label: "Merge", iconBg: "bg-cold/15", iconFg: "text-cold", glyph: <MergeGlyph className="w-4 h-4" /> };
+
+  // Wait
+  if (/\.wait$/i.test(t) || (/scheduleTrigger/i.test(t) && /wait/.test(n)))
+    return { label: "Wait", iconBg: "bg-amber-500/15", iconFg: "text-amber-300", glyph: <IconClock className="w-4 h-4" /> };
+
+  // Agent
+  if (/langchain\.agent/.test(t))
+    return { label: "AI Agent", iconBg: "bg-white/[0.08]", iconFg: "text-white", glyph: <RobotGlyph className="w-4 h-4" /> };
+
+  // Sub-nodes (langchain)
+  if (/lmChatAnthropic/.test(t))
+    return { label: "Anthropic", iconBg: "bg-[#cc785c]/20", iconFg: "text-[#e6b89c]", glyph: <span className="font-bold text-[12px] tracking-tight">A\\</span> };
+  if (/lmChatOpenAi/i.test(t))
+    return { label: "OpenAI", iconBg: "bg-emerald-500/20", iconFg: "text-emerald-300", glyph: <span className="font-bold text-[11px]">OAI</span> };
+  if (/lmChatGoogle/i.test(t) || /gemini/i.test(t))
+    return { label: "Gemini", iconBg: "bg-blue-500/20", iconFg: "text-blue-300", glyph: <span className="font-bold text-[10px]">G</span> };
+  if (/memoryBuffer|memoryWindow/i.test(t))
+    return { label: "Memory", iconBg: "bg-cold/20", iconFg: "text-cold", glyph: <span className="font-bold text-[10px]">M</span> };
+  if (/vectorStore/i.test(t))
+    return { label: "Vector", iconBg: "bg-cold/20", iconFg: "text-cold", glyph: <span className="font-bold text-[10px]">V</span> };
+  if (/outputParser/i.test(t))
+    return { label: "Parser", iconBg: "bg-amber-500/20", iconFg: "text-amber-300", glyph: <span className="font-bold text-[10px]">{"{}"}</span> };
+  if (/tool/i.test(t))
+    return { label: "Tool", iconBg: "bg-amber-500/20", iconFg: "text-amber-300", glyph: <span className="font-bold text-[10px]">T</span> };
+
+  // Actions — branded
+  if (/telegram/.test(t))
+    return { label: "Telegram", iconBg: "bg-[#26a5e4]/15", iconFg: "text-[#26a5e4]", glyph: <IconTelegram className="w-4 h-4" /> };
+  if (/slack/.test(t))
+    return { label: "Slack", iconBg: "bg-[#4a154b]/25", iconFg: "text-[#ecb22e]", glyph: <SlackGlyph className="w-4 h-4" /> };
+  if (/googleCalendar|calendar/i.test(t))
+    return { label: "Calendar", iconBg: "bg-[#4285f4]/20", iconFg: "text-[#8ab4f8]", glyph: <IconCalendar className="w-4 h-4" /> };
+  if (/emailSend|gmail/i.test(t))
+    return { label: "Email", iconBg: "bg-cold/15", iconFg: "text-cold", glyph: <IconMail className="w-4 h-4" /> };
+  if (/httpRequest/i.test(t)) {
+    if (/resend/.test(n))
+      return { label: "Resend", iconBg: "bg-white/[0.08]", iconFg: "text-white", glyph: <IconMail className="w-4 h-4" /> };
+    return { label: "HTTP", iconBg: "bg-cold/15", iconFg: "text-cold", glyph: <IconSend className="w-4 h-4" /> };
+  }
+
+  // Transforms
+  if (/\.set$/i.test(t))
+    return { label: "Set", iconBg: "bg-white/[0.06]", iconFg: "text-ink-muted", glyph: <span className="font-mono font-bold text-[10px]">{"{}"}</span> };
+  if (/code|function/i.test(t))
+    return { label: "Code", iconBg: "bg-white/[0.06]", iconFg: "text-ink-muted", glyph: <span className="font-mono font-bold text-[10px]">{"</>"}</span> };
+  if (/archive/i.test(n))
+    return { label: "Archive", iconBg: "bg-white/[0.06]", iconFg: "text-ink-muted", glyph: <IconArchive className="w-4 h-4" /> };
+  if (/stickyNote/i.test(t))
+    return { label: "Note", iconBg: "bg-amber-500/10", iconFg: "text-amber-300", glyph: <IconRoadmap className="w-4 h-4" /> };
+
+  return { label: "Node", iconBg: "bg-white/[0.06]", iconFg: "text-ink-muted", glyph: <IconDot className="w-4 h-4" /> };
+}
+
+function subAttachType(type: string): SubPort["type"] {
+  if (/lmChat|embeddings/i.test(type)) return "Chat Model";
+  if (/memoryBuffer|memoryWindow/i.test(type)) return "Memory";
+  return "Tool";
+}
+
+// ── Custom node renderers ────────────────────────────────────────────────
+
+function MainNode({ data }: NodeProps<MainNodeData>) {
+  const t = serviceTheme(data.type, data.name);
+  const isTrigger = data.kind === "trigger";
+  const branches = data.branches ?? [];
+
+  return (
+    <div className="relative">
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!w-2 !h-2 !bg-[#52525b] !border-0"
+        style={{ visibility: isTrigger ? "hidden" : "visible" }}
+      />
+
+      {isTrigger && (
+        <div className="absolute -left-7 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-bg border border-accent/40 text-accent flex items-center justify-center shadow-glow-accent">
+          <BoltGlyph className="w-3 h-3" />
+        </div>
+      )}
+
+      <div
+        className={`flex items-center gap-2.5 rounded-xl bg-[#15151a] border border-[#26262b] shadow-[0_2px_12px_rgba(0,0,0,0.5)] px-3 py-2.5 min-w-[210px] ${
+          isTrigger ? "rounded-l-3xl" : ""
+        }`}
+        style={{ boxShadow: isTrigger ? "0 0 0 1px rgba(0,212,170,0.18), 0 2px 12px rgba(0,0,0,0.5)" : undefined }}
+      >
+        <div
+          className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${t.iconBg} ${t.iconFg}`}
+        >
+          {t.glyph}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12.5px] font-semibold text-white leading-tight truncate">
+            {data.name}
+          </div>
+          <div className="text-[10.5px] text-ink-muted/80 leading-tight truncate">
+            {data.subtitle ?? t.label}
+          </div>
+        </div>
+      </div>
+
+      {/* Sub-node attachment ports below the card (agent only) */}
+      {data.ports && data.ports.length > 0 && (
+        <div className="absolute left-0 right-0 top-full flex items-start justify-around pt-1.5 pointer-events-none">
+          {data.ports.map((p) => (
+            <div
+              key={p.name}
+              className="flex flex-col items-center text-[9px] font-mono uppercase tracking-wider text-ink-muted/70 leading-none"
+            >
+              <Handle
+                type="source"
+                position={Position.Bottom}
+                id={`sub:${p.name}`}
+                className="!w-2 !h-2 !rotate-45 !bg-transparent !border !border-ink-muted/60"
+                style={{ position: "static", transform: "rotate(45deg)", marginBottom: 4 }}
+              />
+              <span className="mt-0.5">{p.type}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Branch labels for switch/if */}
+      {branches.length > 0 ? (
+        <>
+          {branches.map((label, i) => (
+            <div
+              key={`${label}-${i}`}
+              className="absolute -right-7 text-[10px] font-mono text-ink-muted/80"
+              style={{ top: `${30 + i * 22}px` }}
+            >
+              {label}
+            </div>
+          ))}
+          {branches.map((label, i) => (
+            <Handle
+              key={`h-${label}-${i}`}
+              type="source"
+              position={Position.Right}
+              id={`branch:${label}`}
+              className="!w-2 !h-2 !bg-[#52525b] !border-0"
+              style={{ top: `${36 + i * 22}px` }}
+            />
+          ))}
+        </>
+      ) : (
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!w-2 !h-2 !bg-[#52525b] !border-0"
+        />
+      )}
+    </div>
+  );
+}
+
+function SubNode({ data }: NodeProps<SubNodeData>) {
+  const t = serviceTheme(data.type, data.name);
+  return (
+    <div className="relative flex flex-col items-center gap-1.5">
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!w-2 !h-2 !rotate-45 !bg-transparent !border !border-ink-muted/60"
+        style={{ transform: "rotate(45deg)" }}
+      />
+      <div
+        className={`w-12 h-12 rounded-full bg-[#15151a] border border-[#26262b] flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.6)] ${t.iconFg}`}
+      >
+        {t.glyph}
+      </div>
+      <div className="text-center max-w-[120px]">
+        <div className="text-[11px] text-white leading-tight">{data.name}</div>
+        <div className="text-[9px] font-mono uppercase tracking-wider text-ink-muted/60 mt-0.5">
+          {t.label}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NoteNode({ data }: NodeProps<MainNodeData>) {
+  return (
+    <div className="rounded-md border border-amber-500/30 bg-amber-500/[0.05] px-2.5 py-1.5">
+      <div className="text-[9px] font-mono uppercase tracking-wider text-amber-300/80">
+        Note
+      </div>
+      <div className="text-[11px] text-ink-muted leading-tight mt-0.5 max-w-[220px]">
+        {data.subtitle ?? data.name}
+      </div>
+    </div>
+  );
+}
+
+const NODE_TYPES = {
+  n8nMain: MainNode,
+  n8nSub: SubNode,
+  n8nNote: NoteNode,
+} as const;
+
+// ── Layout + edge synthesis ──────────────────────────────────────────────
+
+const COL_W = 280;
+const MAIN_ROW_H = 130;
+const SUB_ROW_OFFSET = 130;
+const SUB_COL_W = 130;
+
+function toReactFlow(wf: N8nWorkflow): { nodes: Node[]; edges: Edge[] } {
+  const kinds = new Map<string, NodeKind>();
+  wf.nodes.forEach((n) => kinds.set(n.name, nodeKind(n.type)));
+
+  // Split sub-nodes from the main flow.
+  const mainNodes = wf.nodes.filter((n) => kinds.get(n.name) !== "sub" && kinds.get(n.name) !== "note");
+  const subNodes = wf.nodes.filter((n) => kinds.get(n.name) === "sub");
+  const noteNodes = wf.nodes.filter((n) => kinds.get(n.name) === "note");
+
+  // Layered layout for main flow only.
+  const layout = layeredLayout(wf, mainNodes);
+
+  // For each sub-node, find its parent agent (closest agent in main layout, or first agent).
+  const agents = mainNodes.filter((n) => kinds.get(n.name) === "agent");
+  const subParent = new Map<string, string>(); // subName -> parentAgentName
+  if (agents.length > 0) {
+    subNodes.forEach((s, i) => {
+      // Heuristic: round-robin across agents if multiple.
+      const parent = agents[i % agents.length];
+      subParent.set(s.name, parent.name);
+    });
+  }
+
+  // Branch labels — pull off Switch nodes' rule outputKeys.
+  const branchLabels = new Map<string, string[]>();
+  wf.nodes.forEach((n) => {
+    if (BRANCH_PATTERNS.test(n.type)) {
+      const rules = (n.parameters as any)?.rules?.values ?? [];
+      const labels: string[] = Array.isArray(rules)
+        ? rules.map((r: any, idx: number) => r?.outputKey || String(idx))
+        : [];
+      if (labels.length === 0 && /\.if$/i.test(n.type)) {
+        labels.push("true", "false");
+      }
+      if (labels.length > 0) branchLabels.set(n.name, labels);
+    }
+  });
+
+  // Detect ports per agent (by walking sub-nodes attached to it)
+  const agentPorts = new Map<string, SubPort[]>();
+  agents.forEach((a) => agentPorts.set(a.name, []));
+  subNodes.forEach((s) => {
+    const parent = subParent.get(s.name);
+    if (!parent) return;
+    const list = agentPorts.get(parent) ?? [];
+    list.push({ name: s.name, type: subAttachType(s.type) });
+    agentPorts.set(parent, list);
+  });
+
+  // Build React Flow nodes.
+  const rfNodes: Node[] = [];
+
+  mainNodes.forEach((n) => {
+    const k = kinds.get(n.name) ?? "transform";
+    const pos = layout.get(n.name) ?? { x: 0, y: 0 };
+    const ports = k === "agent" ? agentPorts.get(n.name) : undefined;
+    const branches = branchLabels.get(n.name);
+    rfNodes.push({
+      id: n.name,
+      type: "n8nMain",
+      position: pos,
+      draggable: false,
+      data: {
+        kind: k,
+        name: n.name,
+        type: n.type,
+        service: serviceTheme(n.type, n.name).label,
+        subtitle: subtitleFor(n),
+        ports,
+        branches,
+      } satisfies MainNodeData,
+    });
+  });
+
+  // Position sub-nodes below their parent agent.
+  agents.forEach((a) => {
+    const ports = agentPorts.get(a.name) ?? [];
+    const parentPos = layout.get(a.name) ?? { x: 0, y: 0 };
+    const totalWidth = (ports.length - 1) * SUB_COL_W;
+    const startX = parentPos.x + 105 - totalWidth / 2; // 105 ~ middle of card (210px)
+    ports.forEach((p, i) => {
+      rfNodes.push({
+        id: p.name,
+        type: "n8nSub",
+        position: { x: startX + i * SUB_COL_W, y: parentPos.y + SUB_ROW_OFFSET },
+        draggable: false,
+        data: {
+          kind: "sub",
+          name: p.name,
+          type: subTypeFor(p.name, wf),
+          service: serviceTheme(subTypeFor(p.name, wf), p.name).label,
+          attach: p.type,
+        } satisfies SubNodeData,
+      });
+    });
+  });
+
+  // Notes: place top-left of canvas as a floating annotation.
+  noteNodes.forEach((n, i) => {
+    rfNodes.push({
+      id: n.name,
+      type: "n8nNote",
+      position: { x: -40, y: -100 - i * 80 },
+      draggable: false,
+      data: {
+        kind: "note",
+        name: n.name,
+        type: n.type,
+        service: "note",
+        subtitle: ((n.parameters as any)?.content as string) || n.name,
+      } satisfies MainNodeData,
+    });
+  });
+
+  // Build edges.
+  const rfEdges: Edge[] = [];
+
+  // Main flow edges — use branch handles if the source is a switch.
+  Object.entries(wf.connections ?? {}).forEach(([source, conn]) => {
+    const labels = branchLabels.get(source);
+    (conn.main ?? []).forEach((arr, outIdx) => {
+      arr.forEach((c) => {
+        rfEdges.push({
+          id: `${source}__${outIdx}__${c.node}__${c.index}`,
+          source,
+          target: c.node,
+          sourceHandle: labels && labels[outIdx] ? `branch:${labels[outIdx]}` : undefined,
+          type: "smoothstep",
+          style: { stroke: "rgba(255,255,255,0.32)", strokeWidth: 1.6 },
+        });
+      });
+    });
+  });
+
+  // Sub-node edges (dashed, downward).
+  subNodes.forEach((s) => {
+    const parent = subParent.get(s.name);
+    if (!parent) return;
+    rfEdges.push({
+      id: `sub__${parent}__${s.name}`,
+      source: parent,
+      target: s.name,
+      sourceHandle: `sub:${s.name}`,
+      type: "smoothstep",
+      style: {
+        stroke: "rgba(255,255,255,0.22)",
+        strokeWidth: 1.2,
+        strokeDasharray: "4 4",
+      },
+    });
+  });
+
+  return { nodes: rfNodes, edges: rfEdges };
+}
+
+function subtitleFor(n: N8nNode): string {
+  const params = (n.parameters as any) ?? {};
+  // Common patterns to surface a useful one-liner under the title.
+  if (params?.method && params?.url) return `${String(params.method).toUpperCase()} · ${truncate(String(params.url), 28)}`;
+  if (params?.operation) return `op: ${params.operation}`;
+  if (params?.path) return `path: ${truncate(String(params.path), 22)}`;
+  if (params?.amount && params?.unit) return `wait ${params.amount} ${params.unit}`;
+  if (params?.text) return truncate(String(params.text), 32);
+  if (params?.subject) return truncate(String(params.subject), 28);
+  return shortLabel(n.type);
 }
 
 function shortLabel(type: string): string {
   return type.replace(/^@n8n\//, "").replace(/^n8n-nodes-base\./, "").replace(/^n8n-nodes-langchain\./, "");
 }
 
-function toReactFlow(wf: N8nWorkflow): { nodes: Node[]; edges: Edge[] } {
-  const COL_W = 240;
-  const ROW_H = 110;
+function truncate(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
 
-  // Use n8n-provided positions when available; otherwise derive a layered layout.
-  const hasPos = wf.nodes.every((n) => Array.isArray(n.position) && n.position.length === 2);
-  const layout = hasPos ? n8nPositions(wf.nodes) : layeredLayout(wf);
+function subTypeFor(name: string, wf: N8nWorkflow): string {
+  return wf.nodes.find((x) => x.name === name)?.type ?? "";
+}
 
-  const nodes: Node[] = wf.nodes.map((n) => {
-    const cls = nodeClass(n.type);
-    const { x, y } = layout.get(n.name) ?? { x: 0, y: 0 };
-    return {
-      id: n.name,
-      position: { x, y },
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
-      data: {
-        label: (
-          <div className="flex flex-col items-start gap-0.5 min-w-0">
-            <span className="text-[10px] font-mono uppercase tracking-wider opacity-70">
-              {shortLabel(n.type)}
-            </span>
-            <span className="text-[12px] font-medium text-ink leading-tight truncate max-w-[200px]">
-              {n.name}
-            </span>
-          </div>
-        ),
-      },
-      style: {
-        width: 220,
-        padding: 10,
-        borderRadius: 8,
-        borderWidth: 1,
-        background: "transparent",
-      },
-      className: `border ${cls} text-left`,
-    };
-  });
-
-  const edges: Edge[] = [];
-  Object.entries(wf.connections ?? {}).forEach(([source, conn]) => {
-    (conn.main ?? []).forEach((arr, outIdx) =>
-      arr.forEach((c) => {
-        edges.push({
-          id: `${source}__${outIdx}__${c.node}__${c.index}`,
-          source,
-          target: c.node,
-          sourceHandle: undefined,
-          targetHandle: undefined,
-          type: "smoothstep",
-        });
+function layeredLayout(wf: N8nWorkflow, mainOnly: N8nNode[]): Map<string, { x: number; y: number }> {
+  const mainSet = new Set(mainOnly.map((n) => n.name));
+  const incoming = new Map<string, number>();
+  mainOnly.forEach((n) => incoming.set(n.name, 0));
+  Object.entries(wf.connections ?? {}).forEach(([src, c]) => {
+    if (!mainSet.has(src)) return;
+    (c.main ?? []).forEach((arr) =>
+      arr.forEach((edge) => {
+        if (mainSet.has(edge.node)) {
+          incoming.set(edge.node, (incoming.get(edge.node) ?? 0) + 1);
+        }
       })
     );
   });
-
-  // Compact a bit if n8n positions span huge ranges
-  if (hasPos) {
-    const xs = [...layout.values()].map((p) => p.x);
-    const ys = [...layout.values()].map((p) => p.y);
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
-    nodes.forEach((n) => {
-      n.position = {
-        x: (n.position.x - minX) * 0.8,
-        y: (n.position.y - minY) * 0.8,
-      };
-    });
-  }
-  void COL_W;
-  void ROW_H;
-  return { nodes, edges };
-}
-
-function n8nPositions(nodes: N8nNode[]): Map<string, { x: number; y: number }> {
-  const m = new Map<string, { x: number; y: number }>();
-  for (const n of nodes) {
-    const [x = 0, y = 0] = n.position ?? [];
-    m.set(n.name, { x, y });
-  }
-  return m;
-}
-
-function layeredLayout(wf: N8nWorkflow): Map<string, { x: number; y: number }> {
-  // BFS layering from nodes with no incoming edge
-  const byName = new Map(wf.nodes.map((n) => [n.name, n]));
-  const incoming = new Map<string, number>();
-  wf.nodes.forEach((n) => incoming.set(n.name, 0));
-  Object.values(wf.connections ?? {}).forEach((c) =>
-    (c.main ?? []).forEach((arr) =>
-      arr.forEach((edge) =>
-        incoming.set(edge.node, (incoming.get(edge.node) ?? 0) + 1)
-      )
-    )
-  );
   const layer = new Map<string, number>();
   const queue: string[] = [];
   incoming.forEach((v, k) => {
@@ -560,6 +955,7 @@ function layeredLayout(wf: N8nWorkflow): Map<string, { x: number; y: number }> {
     const out = wf.connections?.[cur]?.main ?? [];
     out.forEach((arr) =>
       arr.forEach((edge) => {
+        if (!mainSet.has(edge.node)) return;
         const next = (layer.get(cur) ?? 0) + 1;
         if ((layer.get(edge.node) ?? -1) < next) {
           layer.set(edge.node, next);
@@ -568,25 +964,117 @@ function layeredLayout(wf: N8nWorkflow): Map<string, { x: number; y: number }> {
       })
     );
   }
-  // group by layer
+  // Group by layer to place evenly.
   const cols = new Map<number, string[]>();
   layer.forEach((l, name) => {
     if (!cols.has(l)) cols.set(l, []);
     cols.get(l)!.push(name);
   });
+  // Stable ordering: original wf.nodes order.
+  cols.forEach((arr) => arr.sort((a, b) => mainOnly.findIndex((n) => n.name === a) - mainOnly.findIndex((n) => n.name === b)));
+
   const result = new Map<string, { x: number; y: number }>();
+  const colCount = Math.max(1, Math.max(...Array.from(cols.keys(), (k) => k + 1)));
   cols.forEach((names, l) => {
+    const totalH = (names.length - 1) * MAIN_ROW_H;
     names.forEach((n, i) => {
-      result.set(n, { x: l * 260, y: i * 110 });
+      result.set(n, {
+        x: l * COL_W,
+        y: i * MAIN_ROW_H - totalH / 2,
+      });
     });
   });
-  // any orphans
-  wf.nodes.forEach((n, i) => {
-    if (!result.has(n.name))
-      result.set(n.name, { x: 0, y: (i + 1) * 110 });
+  // Orphan main-flow nodes get tucked at the bottom.
+  mainOnly.forEach((n, i) => {
+    if (!result.has(n.name)) result.set(n.name, { x: 0, y: (i + 1) * MAIN_ROW_H });
   });
-  void byName;
+  void colCount;
   return result;
+}
+
+// ── Inline glyphs (n8n-style minimal SVGs) ───────────────────────────────
+
+function BoltGlyph({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden>
+      <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" />
+    </svg>
+  );
+}
+
+function SignpostGlyph({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M12 3v3" />
+      <path d="M12 11v3" />
+      <path d="M12 19v2" />
+      <path d="M5 6h12l3 2.5L17 11H5z" />
+      <path d="M19 14H7l-3 2.5L7 19h12z" />
+    </svg>
+  );
+}
+
+function MergeGlyph({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M5 5l7 7 7-7" />
+      <path d="M12 12v8" />
+    </svg>
+  );
+}
+
+function RobotGlyph({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <rect x="4" y="7" width="16" height="11" rx="2.5" />
+      <circle cx="9" cy="12.5" r="1.3" fill="currentColor" />
+      <circle cx="15" cy="12.5" r="1.3" fill="currentColor" />
+      <path d="M9 16h6" />
+      <path d="M12 4v3" />
+    </svg>
+  );
+}
+
+function SlackGlyph({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
+      <path fill="#36c5f0" d="M5 14a2 2 0 1 1 0-4h2v4z" />
+      <path fill="#36c5f0" d="M6 14h2v2a2 2 0 1 1-2 0z" />
+      <path fill="#2eb67d" d="M10 5a2 2 0 1 1 4 0v2h-2a2 2 0 0 1-2-2z" />
+      <path fill="#2eb67d" d="M10 6h2a2 2 0 0 1 2 2v2h-4z" />
+      <path fill="#ecb22e" d="M19 10a2 2 0 1 1 0 4h-2v-4z" />
+      <path fill="#ecb22e" d="M16 10v-2a2 2 0 1 1 2 0v2z" />
+      <path fill="#e01e5a" d="M14 19a2 2 0 1 1-4 0v-2h2a2 2 0 0 1 2 2z" />
+      <path fill="#e01e5a" d="M10 16h4v2h-4z" />
+    </svg>
+  );
 }
 
 // ── 4. Workflow JSON + validation card ───────────────────────────────────
