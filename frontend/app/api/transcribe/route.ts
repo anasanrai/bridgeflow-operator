@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export async function POST(req: NextRequest) {
   // Forward the multipart body straight through. We can't read it as text

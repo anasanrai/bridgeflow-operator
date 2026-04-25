@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
