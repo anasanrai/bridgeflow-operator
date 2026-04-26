@@ -518,14 +518,16 @@ function VisionCard({
             </span>
           </div>
           <div className="text-[11px] text-muted mt-1 leading-relaxed max-w-xl">
-            When enabled, Jarvis can look at your screen on each turn and
-            answer about what's on it. "What does this lead row mean?" "Where's
-            the approve button?" — Jarvis points the cursor for you. Routed
-            through Claude Haiku 4.5 for fast, cheap vision.
+            When on, Jarvis snapshots the BridgeFlow tab automatically on
+            every question and reads it as ground truth. Ask "what am I
+            looking at?", "where do I click to approve?", "what does this
+            row mean?" — Jarvis answers from what's actually on screen.
+            Routed through Claude Haiku 4.5 for fast, cheap vision.
           </div>
           <div className="text-[10px] text-faint mt-1.5 leading-relaxed">
-            You'll be asked to share a tab/window on first activation. Frames
-            never leave your machine until you ask Jarvis a question.
+            No screen-share dialog. Capture is scoped to this app's tab,
+            never your other windows. Frames are sent only when you send a
+            message — not in the background.
           </div>
         </div>
         <Toggle

@@ -28,7 +28,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   IconChevron,
   IconEye,
-  IconEyeOff,
   IconLogo,
   IconRefresh,
   IconSparkle,
@@ -58,6 +57,11 @@ const MAX_HISTORY = 30;
 
 const ACTION_RE = /\{\s*"action"\s*:\s*"(navigate|click|run_demo)"(?:\s*,\s*"target"\s*:\s*"([^"]+)")?\s*\}/i;
 
+// "jarvis stop", "stop jarvis", "stop talking", "shut up", bare "stop", "quiet",
+// "be quiet", "enough", "cancel". Lowercased + trimmed before matching.
+const STOP_INTENT_RE =
+  /^(?:jarvis[, ]+)?(?:stop(?:\s+(?:talking|jarvis|please|now))?|shut\s+up|be\s+quiet|quiet|enough|cancel)[.!?]?$/i;
+
 export function JarvisOverlay() {
   const router = useRouter();
   const pathname = usePathname();
@@ -86,85 +90,44 @@ export function JarvisOverlay() {
   const [speakingTail, setSpeakingTail] = useState("");
 
   // ── Vision (Claude Haiku 4.5 screen sense) ──────────────────────────
-  // Operator-toggled. When on, we hold a getDisplayMedia stream and
-  // capture a single JPEG frame on each turn — routed to /jarvis-vision
-  // instead of /jarvis. Stream lifecycle: started when operator clicks
-  // the eye, stopped when toggled off, the panel closes, or the browser
-  // tab cancels sharing.
-  const [visionActive, setVisionActive] = useState(false);
+  // Auto-capture mode — no screen-share dialog, no permissions. When
+  // settings.vision_enabled is on, every non-greeting turn snapshots the
+  // current BridgeFlow tab via DOM-to-image and routes to /jarvis-vision.
+  // Scope is limited to what's rendered in this app, which is the point:
+  // Jarvis sees what the operator sees inside the operator console.
   const [visionErr, setVisionErr] = useState<string | null>(null);
-  const visionStreamRef = useRef<MediaStream | null>(null);
-  const visionVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [visionCapturing, setVisionCapturing] = useState(false);
 
-  const stopVision = useCallback(() => {
+  const captureFrame = useCallback(async (): Promise<string | null> => {
+    if (typeof window === "undefined") return null;
     try {
-      visionStreamRef.current?.getTracks().forEach((t) => t.stop());
-    } catch {
-      // ignore
-    }
-    visionStreamRef.current = null;
-    visionVideoRef.current = null;
-    setVisionActive(false);
-  }, []);
-
-  const startVision = useCallback(async () => {
-    if (typeof window === "undefined") return;
-    setVisionErr(null);
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      setVisionErr("Screen capture isn't supported in this browser.");
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 4 } as MediaTrackConstraints,
-        audio: false,
+      // Lazy import — keeps the chunk out of the initial bundle and avoids
+      // SSR import paths.
+      const mod = await import("html-to-image");
+      // Capture body excluding the Jarvis overlay itself (we don't need
+      // Jarvis to see Jarvis — that's a hall-of-mirrors moment).
+      const dataUrl = await mod.toJpeg(document.body, {
+        quality: 0.7,
+        pixelRatio: 1,
+        backgroundColor: "#0a0a0a",
+        cacheBust: false,
+        filter: (node: HTMLElement) => {
+          if (!(node instanceof HTMLElement)) return true;
+          if (node.dataset?.jarvisOverlay === "true") return false;
+          return true;
+        },
       });
-      visionStreamRef.current = stream;
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      video.muted = true;
-      await video.play().catch(() => {});
-      visionVideoRef.current = video;
-      // If the operator stops sharing from the browser bar, sync state.
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => stopVision());
-      setVisionActive(true);
+      const comma = dataUrl.indexOf(",");
+      return comma >= 0 ? dataUrl.slice(comma + 1) : null;
     } catch (err) {
-      const e = err as Error;
-      if (e.name === "NotAllowedError") {
-        setVisionErr("Screen sharing was declined.");
-      } else {
-        setVisionErr(`Vision failed: ${e.message}`);
-      }
-      setVisionActive(false);
+      // Don't fail the turn — just degrade to text-only and surface a quiet
+      // banner so the operator knows.
+      setVisionErr(`Vision capture failed — falling back to text. ${(err as Error).message?.slice(0, 80) || ""}`);
+      return null;
     }
-  }, [stopVision]);
-
-  // Capture one JPEG (base64, no prefix) from the live stream.
-  const captureFrame = useCallback((): string | null => {
-    const v = visionVideoRef.current;
-    if (!v || !v.videoWidth) return null;
-    // Downscale to ~1280px max long edge — Haiku doesn't need 4K.
-    const MAX = 1280;
-    const ratio = Math.min(MAX / v.videoWidth, MAX / v.videoHeight, 1);
-    const w = Math.round(v.videoWidth * ratio);
-    const h = Math.round(v.videoHeight * ratio);
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(v, 0, 0, w, h);
-    const url = canvas.toDataURL("image/jpeg", 0.7);
-    const comma = url.indexOf(",");
-    return comma >= 0 ? url.slice(comma + 1) : null;
   }, []);
 
-  // Auto-stop vision on unmount.
-  useEffect(() => {
-    return () => stopVision();
-  }, [stopVision]);
-
-  // Auto-dismiss the vision error after 4s — same UX as voiceErr.
+  // Auto-dismiss the vision error after 4s.
   useEffect(() => {
     if (!visionErr) return;
     const t = setTimeout(() => setVisionErr(null), 4000);
@@ -508,19 +471,16 @@ export function JarvisOverlay() {
         }
       };
 
-      // If vision is active and the stream is healthy, grab a frame and
-      // route through /jarvis-vision (Claude Haiku 4.5). Otherwise the
-      // standard /jarvis path (Opus 4.7).
+      // If vision is enabled, capture the live tab via DOM-to-image and
+      // route through /jarvis-vision (Claude Haiku 4.5). Greetings skip
+      // vision — there's no question to ground in pixels yet.
       let frame: string | null = null;
-      if (
-        settings.vision_enabled &&
-        visionActive &&
-        opts.kind !== "greeting"
-      ) {
+      if (settings.vision_enabled && opts.kind !== "greeting") {
+        setVisionCapturing(true);
         try {
-          frame = captureFrame();
-        } catch {
-          frame = null;
+          frame = await captureFrame();
+        } finally {
+          setVisionCapturing(false);
         }
       }
       const targetUrl = frame ? "/api/jarvis-vision" : "/api/jarvis";
@@ -629,7 +589,6 @@ export function JarvisOverlay() {
       executeAction,
       enqueueSentenceTTS,
       stopAllAudio,
-      visionActive,
       captureFrame,
     ]
   );
@@ -653,10 +612,17 @@ export function JarvisOverlay() {
     enabled: settings.always_on,
     wakeWord: settings.wake_word || "jarvis",
     onCommand: (cmd) => {
+      const trimmed = (cmd || "").trim();
+      // "jarvis stop" / "stop talking" / etc. → kill the in-flight stream
+      // and audio without firing a new turn. The operator just wants quiet.
+      if (STOP_INTENT_RE.test(trimmed)) {
+        handleInterrupt();
+        return;
+      }
       // Make sure the panel is visible so the operator can see the
       // command being processed.
       setOpen(true);
-      void sendRef.current(cmd);
+      void sendRef.current(trimmed);
     },
     speakingNow,
     speakingTail,
@@ -752,7 +718,10 @@ export function JarvisOverlay() {
       : "bg-faint";
 
   return (
-    <div className="fixed bottom-4 right-4 z-[60] pointer-events-none">
+    <div
+      data-jarvis-overlay="true"
+      className="fixed bottom-4 right-4 z-[60] pointer-events-none"
+    >
       <div className="pointer-events-auto">
         {open ? (
           <JarvisPanel
@@ -780,12 +749,10 @@ export function JarvisOverlay() {
             providerLabel={
               settings.provider === "elevenlabs" ? "elevenlabs · daniel" : "browser tts"
             }
-            visionAvailable={settings.vision_enabled}
-            visionActive={visionActive}
+            visionEnabled={settings.vision_enabled}
+            visionCapturing={visionCapturing}
             visionErr={visionErr}
-            onToggleVision={() =>
-              visionActive ? stopVision() : void startVision()
-            }
+            onStop={handleInterrupt}
           />
         ) : (
           <JarvisFab
@@ -882,10 +849,10 @@ function JarvisPanel({
   alwaysOn,
   wakeWord,
   onEnableWake,
-  visionAvailable,
-  visionActive,
+  visionEnabled,
+  visionCapturing,
   visionErr,
-  onToggleVision,
+  onStop,
 }: {
   messages: Msg[];
   input: string;
@@ -909,10 +876,10 @@ function JarvisPanel({
   alwaysOn: boolean;
   wakeWord: string;
   onEnableWake: () => void;
-  visionAvailable: boolean;
-  visionActive: boolean;
+  visionEnabled: boolean;
+  visionCapturing: boolean;
   visionErr: string | null;
-  onToggleVision: () => void;
+  onStop: () => void;
 }) {
   const showEnableWake =
     alwaysOn && !wakeUnsupported && wakeState === "off" && !wakePermissionDenied;
@@ -970,27 +937,26 @@ function JarvisPanel({
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {visionAvailable && (
-            <button
-              onClick={onToggleVision}
-              title={
-                visionActive
-                  ? "Stop screen sense"
-                  : "Let Jarvis see your screen (Haiku 4.5)"
-              }
-              aria-pressed={visionActive}
-              aria-label="Toggle vision"
-              className={`w-7 h-7 rounded-md border flex items-center justify-center cursor-pointer transition-colors ${
-                visionActive
-                  ? "border-accent/45 bg-accent/[0.10] text-accent shadow-glow-accent"
-                  : "border-border text-muted hover:text-ink hover:bg-surface-2"
+          {visionEnabled && (
+            <span
+              title="Vision on · Jarvis sees your screen each turn (Haiku 4.5)"
+              aria-label="Vision enabled"
+              className={`w-7 h-7 rounded-md border border-accent/40 bg-accent/[0.08] text-accent flex items-center justify-center ${
+                visionCapturing ? "shadow-glow-accent animate-blink" : ""
               }`}
             >
-              {visionActive ? (
-                <IconEye className="w-3.5 h-3.5" />
-              ) : (
-                <IconEyeOff className="w-3.5 h-3.5" />
-              )}
+              <IconEye className="w-3.5 h-3.5" />
+            </span>
+          )}
+          {(streaming || speakingNow) && (
+            <button
+              onClick={onStop}
+              title='Stop ("jarvis stop" also works)'
+              aria-label="Stop"
+              className="h-7 px-2 rounded-md border border-hot/45 bg-hot/[0.08] text-hot text-[11px] font-mono uppercase tracking-wider hover:bg-hot/[0.15] flex items-center gap-1 cursor-pointer"
+            >
+              <span className="w-2 h-2 rounded-sm bg-hot" />
+              stop
             </button>
           )}
           <a
@@ -1066,10 +1032,10 @@ function JarvisPanel({
           {visionErr}
         </div>
       )}
-      {visionActive && !visionErr && (
+      {visionCapturing && !visionErr && (
         <div className="px-4 py-1.5 border-t border-accent/30 bg-accent/[0.05] text-[10px] font-mono uppercase tracking-wider text-accent flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent animate-blink" />
-          screen sense live · haiku 4.5
+          looking at the screen · haiku 4.5
         </div>
       )}
 
