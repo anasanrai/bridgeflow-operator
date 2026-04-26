@@ -19,8 +19,10 @@
  * embedded on their own line are parsed and executed (router.push,
  * custom DOM events).
  *
- * Memory: in-session only — last 30 messages persist to localStorage
- * so a page refresh doesn't lose context.
+ * Memory: in-memory only. Navigation across pages keeps the chat (the
+ * overlay stays mounted in the Shell), but a page refresh wipes the
+ * chat and fires a fresh greeting on /dashboard. The operator wanted
+ * refresh = clean slate.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -51,9 +53,10 @@ interface JarvisAction {
   target?: string;
 }
 
-const STORAGE_KEY = "bridgeflow.jarvis.history.v1";
-const GREETING_FLAG = "bridgeflow.jarvis.greeted.v1";
-const MAX_HISTORY = 30;
+// Legacy storage keys — wiped on first mount so users with older
+// builds don't see stale history hydrate. No new writes happen.
+const LEGACY_HISTORY_KEY = "bridgeflow.jarvis.history.v1";
+const LEGACY_GREETING_FLAG = "bridgeflow.jarvis.greeted.v1";
 
 const ACTION_RE = /\{\s*"action"\s*:\s*"(navigate|click|run_demo)"(?:\s*,\s*"target"\s*:\s*"([^"]+)")?\s*\}/i;
 
@@ -261,29 +264,19 @@ export function JarvisOverlay() {
     [settings.provider, settings.voice_enabled, settings.voice_id, playNextInQueue]
   );
 
-  // ── History hydration + persistence ─────────────────────────────────
+  // ── One-time cleanup of legacy persistence ──────────────────────────
+  // Earlier builds saved chat history to localStorage and a greeting
+  // flag to sessionStorage. Both caused refresh to hydrate stale state.
+  // Wipe them once on mount so the operator's first refresh after this
+  // ships starts clean.
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Msg[];
-        setMessages(parsed.slice(-MAX_HISTORY));
-      }
+      localStorage.removeItem(LEGACY_HISTORY_KEY);
+      sessionStorage.removeItem(LEGACY_GREETING_FLAG);
     } catch {
       // ignore
     }
   }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(messages.filter((m) => !m.streaming).slice(-MAX_HISTORY))
-      );
-    } catch {
-      // ignore
-    }
-  }, [messages]);
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -653,23 +646,16 @@ export function JarvisOverlay() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.always_on]);
 
-  // ── Greeting on /dashboard, once per session ────────────────────────
+  // ── Greeting on /dashboard ──────────────────────────────────────────
+  // Fires once per page load. greetedRef is in-memory only, so:
+  //   - navigating /dashboard → /pipeline → /dashboard keeps the chat
+  //     and does NOT re-greet (ref stays true while overlay is mounted)
+  //   - hard refresh remounts the overlay, ref resets to false, fresh
+  //     greeting fires
   useEffect(() => {
     if (pathname !== "/dashboard") return;
     if (greetedRef.current) return;
-    let alreadyGreeted = false;
-    try {
-      alreadyGreeted = sessionStorage.getItem(GREETING_FLAG) === "1";
-    } catch {
-      // ignore
-    }
-    if (alreadyGreeted) return;
     greetedRef.current = true;
-    try {
-      sessionStorage.setItem(GREETING_FLAG, "1");
-    } catch {
-      // ignore
-    }
     setOpen(true);
     const t = setTimeout(() => {
       void send("", { kind: "greeting" });
@@ -684,11 +670,7 @@ export function JarvisOverlay() {
     setMessages([]);
     setInput("");
     setStreaming(false);
-    try {
-      sessionStorage.removeItem(GREETING_FLAG);
-    } catch {
-      // ignore
-    }
+    greetedRef.current = false;
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
