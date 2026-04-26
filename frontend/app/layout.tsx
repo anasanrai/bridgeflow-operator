@@ -10,7 +10,11 @@ const inter = Inter({
   display: "swap",
 });
 
+const SITE_URL = "https://operator.bridgeflow.agency";
+const OG_IMAGE = `${SITE_URL}/og.png`;
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "BridgeFlow Operator",
   description:
     "Autonomous 5-agent sales pipeline · Built with Claude Opus 4.7 for the Built-with-4.7 hackathon.",
@@ -19,11 +23,27 @@ export const metadata: Metadata = {
     shortcut: ["/favicon.svg"],
   },
   openGraph: {
-    title: "BridgeFlow Operator",
-    description: "Drop a sales call. Five Opus 4.7 agents qualify, draft, fire, and self-review.",
-    url: "https://github.com/anasanrai/bridgeflow-operator",
+    title: "BridgeFlow Operator · Built with Opus 4.7",
+    description:
+      "Drop a sales call. Five Opus 4.7 agents qualify, draft, fire, and self-review.",
+    url: SITE_URL,
     siteName: "BridgeFlow Operator",
     type: "website",
+    images: [
+      {
+        url: OG_IMAGE,
+        width: 1200,
+        height: 630,
+        alt: "BridgeFlow Operator · Built with Claude Opus 4.7",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "BridgeFlow Operator · Built with Opus 4.7",
+    description:
+      "Drop a sales call. Five Opus 4.7 agents qualify, draft, fire, and self-review.",
+    images: [OG_IMAGE],
   },
 };
 

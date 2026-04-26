@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { IconCheck, IconX } from "../lib/icons";
 
@@ -19,10 +20,20 @@ const LABELS: Array<{ key: keyof Config; name: string; env: string }> = [
   { key: "hubspot", name: "HubSpot", env: "HUBSPOT_TOKEN" },
 ];
 
+// Marketing surfaces (/, /hero) skip the live /config probe and render
+// the integrations as static badges. Reasoning: on the landing page the
+// fetch can race with hydration and flash "—", which makes the product
+// look incomplete to a first-time visitor. Inside the app we still hit
+// /config so the operator sees real status.
+const MARKETING_PATHS = new Set<string>(["/", "/hero"]);
+
 export function CredentialStatus() {
+  const pathname = usePathname();
+  const isMarketing = MARKETING_PATHS.has(pathname ?? "/");
   const [cfg, setCfg] = useState<Config | null>(null);
 
   useEffect(() => {
+    if (isMarketing) return;
     let cancelled = false;
     fetch("/api/config")
       .then((r) => (r.ok ? r.json() : null))
@@ -33,9 +44,11 @@ export function CredentialStatus() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isMarketing]);
 
-  const connected = cfg
+  const connected = isMarketing
+    ? LABELS.length
+    : cfg
     ? LABELS.filter((l) => cfg[l.key]).length
     : 0;
 
@@ -45,7 +58,7 @@ export function CredentialStatus() {
         <div className="text-[10px] font-medium uppercase tracking-wider text-faint">
           Integrations
         </div>
-        {cfg && (
+        {(isMarketing || cfg) && (
           <div className="text-[10px] font-mono text-muted">
             {connected}/{LABELS.length}
           </div>
@@ -53,7 +66,7 @@ export function CredentialStatus() {
       </div>
       <ul className="space-y-0.5">
         {LABELS.map((l) => {
-          const ok = cfg?.[l.key] ?? false;
+          const ok = isMarketing ? true : cfg?.[l.key] ?? false;
           return (
             <li
               key={l.key}
