@@ -107,9 +107,9 @@ function AIModelsCard({ config }: { config: ConfigStatus | null }) {
         placeholder="gsk_***"
         ok={!!config?.groq}
         whereToGet="https://console.groq.com/keys"
-        note="Used by V1 Call Recording (Whisper-large-v3-turbo transcription)."
+        note="Powers Call Recording transcription (Whisper-large-v3-turbo)."
       />
-      <V2Note label="OpenAI / Gemini selectors" />
+      <ComingSoonRow label="OpenAI / Gemini model selectors" />
     </Section>
   );
 }
@@ -140,9 +140,8 @@ function NotificationsCard({ config }: { config: ConfigStatus | null }) {
         placeholder="https://hooks.slack.com/services/T***/B***/***"
         ok={false}
         whereToGet="Slack admin → Incoming Webhooks"
-        beta="V2 Beta"
         comingSoon
-        note="Slack APPROVE / EDIT / SKIP parity ships next to Telegram in V2."
+        note="Slack APPROVE / EDIT / SKIP parity, alongside Telegram. Coming soon."
       />
     </Section>
   );
@@ -333,7 +332,7 @@ function EmailCard({ config }: { config: ConfigStatus | null }) {
   );
 }
 
-// ── V2 CRM (HubSpot — live) ─────────────────────────────────────────────
+// ── CRM (HubSpot live, others coming) ───────────────────────────────────
 
 function CRMCard({ config }: { config: ConfigStatus | null }) {
   const ok = !!config?.hubspot;
@@ -403,7 +402,59 @@ function CRMCard({ config }: { config: ConfigStatus | null }) {
           actions appear in the Action Manifest with click-through links.
         </div>
       </div>
+
+      <CRMConnectorRow
+        title="Go High Level"
+        subtitle="Sub-account contacts + opportunities · auto-sync on HOT/WARM"
+        glyph="G"
+        toneClass="bg-[#3a86ff]/15 border-[#3a86ff]/40 text-[#7eb1ff]"
+      />
+      <CRMConnectorRow
+        title="Salesforce"
+        subtitle="Lead + opportunity sync · approval-gated writes"
+        glyph="SF"
+        toneClass="bg-sky-500/15 border-sky-500/40 text-sky-300"
+      />
+      <CRMConnectorRow
+        title="Follow Up Boss"
+        subtitle="Realty-focused · auto-route HOT leads to the right agent"
+        glyph="FUB"
+        toneClass="bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
+      />
     </Section>
+  );
+}
+
+function CRMConnectorRow({
+  title,
+  subtitle,
+  glyph,
+  toneClass,
+}: {
+  title: string;
+  subtitle: string;
+  glyph: string;
+  toneClass: string;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-bg/40 p-3 flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center gap-2 min-w-0">
+        <div
+          className={`w-7 h-7 rounded-md flex items-center justify-center border ${toneClass}`}
+        >
+          <span className="text-[10px] font-bold leading-none tracking-tight">
+            {glyph}
+          </span>
+        </div>
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold text-ink truncate">{title}</div>
+          <div className="text-[11px] text-muted truncate">{subtitle}</div>
+        </div>
+      </div>
+      <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-200 bg-amber-500/10 shrink-0">
+        Coming soon
+      </span>
+    </div>
   );
 }
 
@@ -459,14 +510,14 @@ function ComingSoon() {
             <IconLock className="w-3.5 h-3.5" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-ink">Coming in V3</h2>
+            <h2 className="text-sm font-semibold text-ink">Coming next</h2>
             <p className="text-[11px] text-muted">
-              Real CRM + calendar + WhatsApp connectors.
+              Calendar + WhatsApp connectors. CRM is already live above.
             </p>
           </div>
         </div>
         <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-200 bg-amber-500/10">
-          V3
+          Coming soon
         </span>
       </header>
       <div className="p-5 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -481,7 +532,7 @@ function ComingSoon() {
               </div>
               <span className="inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-200 bg-amber-500/10">
                 <IconLock className="w-2.5 h-2.5" />
-                Connect in V3
+                Coming soon
               </span>
             </div>
             <div className="mt-3 text-[13px] font-semibold text-ink">{c.title}</div>
@@ -661,12 +712,12 @@ function CodeBlock({ value }: { value: string }) {
   );
 }
 
-function V2Note({ label }: { label: string }) {
+function ComingSoonRow({ label }: { label: string }) {
   return (
     <div className="rounded-lg border border-amber-500/35 bg-amber-500/[0.04] px-3 py-2 flex items-center justify-between">
       <span className="text-[12px] text-amber-200">{label}</span>
       <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-200 bg-amber-500/10">
-        Building V2 → V3
+        Coming soon
       </span>
     </div>
   );

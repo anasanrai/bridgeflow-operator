@@ -143,17 +143,17 @@ function PipelinePoster() {
   );
 }
 
-// ── V1 / V2 / V3 / V4 spec grid ─────────────────────────────────────────
+// ── Roadmap spec grid ───────────────────────────────────────────────────
 
 function SpecGrid() {
   const items: Array<{
     version: string;
-    state: "live" | "building" | "coming" | "roadmap";
+    state: "live" | "coming" | "roadmap";
     title: string;
     bullets: string[];
   }> = [
     {
-      version: "V1",
+      version: "Live now",
       state: "live",
       title: "Transcript → Intelligence",
       bullets: [
@@ -164,8 +164,8 @@ function SpecGrid() {
       ],
     },
     {
-      version: "V2",
-      state: "building",
+      version: "Live now",
+      state: "live",
       title: "Intelligence → Action",
       bullets: [
         "Company identity vault (agents speak as you)",
@@ -175,7 +175,7 @@ function SpecGrid() {
       ],
     },
     {
-      version: "V3",
+      version: "Coming soon",
       state: "coming",
       title: "Real Call Center",
       bullets: [
@@ -186,7 +186,7 @@ function SpecGrid() {
       ],
     },
     {
-      version: "V4",
+      version: "Roadmap",
       state: "roadmap",
       title: "Autonomous Agency",
       bullets: [
@@ -200,12 +200,7 @@ function SpecGrid() {
 
   const meta = {
     live: { tag: "LIVE", cls: "border-accent/40 text-accent bg-accent/10", glow: "ring-1 ring-accent/30" },
-    building: {
-      tag: "BUILDING NOW",
-      cls: "border-amber-500/45 text-amber-200 bg-amber-500/10",
-      glow: "ring-1 ring-amber-500/25",
-    },
-    coming: { tag: "COMING", cls: "border-border text-muted bg-surface", glow: "" },
+    coming: { tag: "COMING SOON", cls: "border-border text-muted bg-surface", glow: "" },
     roadmap: { tag: "ROADMAP", cls: "border-border text-faint bg-surface", glow: "" },
   } as const;
 

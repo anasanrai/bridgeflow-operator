@@ -121,6 +121,16 @@ export const IconCalendar = (p: Props) => (
   </svg>
 );
 
+export const IconTrash = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M3 6h18" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <path d="M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+  </svg>
+);
+
 export const IconArchive = (p: Props) => (
   <svg {...base} {...p}>
     <rect x="3" y="4" width="18" height="4" rx="1" />

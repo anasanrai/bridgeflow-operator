@@ -179,8 +179,8 @@ function Header({
               <h2 className="text-sm font-semibold text-ink">
                 Workflow Generator
               </h2>
-              <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-200 bg-amber-500/10">
-                V2 · Building Now
+              <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+                Live
               </span>
               {validation && <ValidationBadge validation={validation} />}
               {refining && (

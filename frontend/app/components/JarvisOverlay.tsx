@@ -1119,7 +1119,7 @@ function EmptyState({ onPick }: { onPick: (q: string) => void }) {
   const samples = [
     "What's the state of the system right now?",
     "Any leads waiting for my approval?",
-    "Open the V2 workflow tab",
+    "Open the workflow tab",
     "Run the demo pipeline",
   ];
   return (

@@ -74,7 +74,7 @@ export default function DashboardPage() {
         <StatCard
           label="Total leads"
           value={loading ? "—" : stats.total.toLocaleString()}
-          delta={stats.total > 0 ? { value: 12 } : null}
+          delta={null}
           icon={IconUsers}
           accent="accent"
           sparkline={stats.spark.total}
@@ -82,23 +82,23 @@ export default function DashboardPage() {
         <StatCard
           label="Hot leads"
           value={loading ? "—" : stats.hot}
-          delta={stats.hot > 0 ? { value: 34 } : null}
+          delta={null}
           icon={IconFlame}
           accent="hot"
           sparkline={stats.spark.hot}
         />
         <StatCard
-          label="Avg confidence"
-          value={loading ? "—" : `${stats.avgConfidence}%`}
-          delta={stats.avgConfidence > 0 ? { value: 4, suffix: "pp" } : null}
+          label="Hot rate"
+          value={loading ? "—" : `${stats.hotRate}%`}
+          delta={null}
           icon={IconTarget}
           accent="warm"
           sparkline={stats.spark.confidence}
         />
         <StatCard
-          label="Deals won"
+          label="Calls booked"
           value={loading ? "—" : stats.dealsWon}
-          delta={stats.dealsWon > 0 ? { value: 2, suffix: "" } : null}
+          delta={null}
           icon={IconCheck}
           accent="cold"
           sparkline={stats.spark.won}
@@ -117,32 +117,32 @@ export default function DashboardPage() {
 
 type RoadmapItem = {
   version: string;
-  status: "live" | "building" | "coming" | "roadmap";
+  status: "live" | "coming" | "roadmap";
   title: string;
   body: string;
 };
 
 const ROADMAP: RoadmapItem[] = [
   {
-    version: "V1",
+    version: "Live now",
     status: "live",
     title: "Call Recording + Transcript → 5-Agent Intelligence",
-    body: "Paste or upload a call recording. Five Opus 4.7 agents qualify the lead, draft the campaign, fire Resend + Telegram, and self-review.",
+    body: "Paste, upload, or describe a call. Five Opus 4.7 agents qualify the lead, draft the campaign, fire Resend + Telegram + HubSpot, and self-review.",
   },
   {
-    version: "V2",
-    status: "building",
+    version: "Live now",
+    status: "live",
     title: "Intelligence → Playbook + Workflow Generator",
     body: "Agent manifests render as a structured playbook, copyable production-ready n8n workflow JSON, credential checklist, visual workflow preview, and a manual handoff package.",
   },
   {
-    version: "V3",
+    version: "Coming soon",
     status: "coming",
     title: "Real Call Center — Inbound + Outbound Agents",
     body: "Live call agents handle inbound and outbound calls. Every call recording automatically feeds the 5-agent pipeline. Works with your own call recordings too.",
   },
   {
-    version: "V4",
+    version: "Roadmap",
     status: "roadmap",
     title: "Complete Autonomous Agency — MCP-Powered Department Agents",
     body: "Each department runs dedicated Opus 4.7 agents empowered with MCP tools. Agents handle clients end-to-end. 5/95 human-to-agent ratio. Secure credential vault per agent. Full observability.",
@@ -186,12 +186,6 @@ function RoadmapCard({ item }: { item: RoadmapItem }) {
       dot: "bg-accent shadow-glow-accent",
       mark: <IconCheck className="w-3.5 h-3.5" />,
     },
-    building: {
-      wrap: "border-amber-500/45 bg-amber-500/[0.06]",
-      chip: "border-amber-500/45 text-amber-200 bg-amber-500/10",
-      dot: "bg-amber-400 animate-blink",
-      mark: <IconSparkle className="w-3.5 h-3.5" />,
-    },
     coming: {
       wrap: "border-border bg-bg/40",
       chip: "border-border text-muted bg-surface",
@@ -208,8 +202,7 @@ function RoadmapCard({ item }: { item: RoadmapItem }) {
   const p = palette[item.status];
   const label: Record<RoadmapItem["status"], string> = {
     live: "LIVE",
-    building: "BUILDING NOW",
-    coming: "COMING",
+    coming: "COMING SOON",
     roadmap: "ROADMAP",
   };
 
@@ -359,9 +352,8 @@ function computeStats(leads: Lead[]) {
   const dealsWon = leads.filter(
     (l) => (l.decision ?? "").includes("book_call")
   ).length;
-  // Fake-but-plausible average since we don't persist confidence per lead yet
-  const avgConfidence = total > 0 ? Math.round(62 + hot * 2.5 + warm * 1.1) : 0;
-  const clamped = Math.min(98, avgConfidence);
+  // Honest "hot rate" — share of leads that scored HOT. No synthetic formula.
+  const hotRate = total > 0 ? Math.round((hot / total) * 100) : 0;
 
   return {
     total,
@@ -369,8 +361,8 @@ function computeStats(leads: Lead[]) {
     warm,
     cold,
     dealsWon,
-    avgConfidence: clamped,
-    spark: makeSparklines(total, hot, clamped, dealsWon),
+    hotRate,
+    spark: makeSparklines(total, hot, hotRate, dealsWon),
   };
 }
 

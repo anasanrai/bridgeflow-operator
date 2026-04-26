@@ -6,6 +6,7 @@ import {
   IconClock,
   IconRefresh,
   IconSearch,
+  IconTrash,
 } from "../lib/icons";
 import { fmtDecision, fmtRelative } from "../lib/leads";
 import { ScoreBadge } from "../components/ScoreBadge";
@@ -49,6 +50,23 @@ export default function HistoryPage() {
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
+
+  const onRemove = async (id: string) => {
+    if (
+      !confirm(
+        "Remove this run permanently? It disappears from /history and the dashboard. This cannot be undone."
+      )
+    )
+      return;
+    try {
+      const r = await fetch(`/api/runs/${id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(await r.text());
+      setRuns((rows) => rows.filter((row) => row.id !== id));
+      if (openId === id) setOpenId(null);
+    } catch (err) {
+      alert("Remove failed: " + (err as Error).message);
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -139,7 +157,7 @@ export default function HistoryPage() {
                 <Th>Score</Th>
                 <Th>Decision</Th>
                 <Th>Status</Th>
-                <Th className="w-8"></Th>
+                <Th className="text-right w-20">Actions</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -166,6 +184,7 @@ export default function HistoryPage() {
                     run={r}
                     open={openId === r.id}
                     onToggle={() => setOpenId(openId === r.id ? null : r.id)}
+                    onRemove={() => onRemove(r.id)}
                   />
                 ))
               )}
@@ -177,7 +196,17 @@ export default function HistoryPage() {
   );
 }
 
-function RunRow({ run, open, onToggle }: { run: Run; open: boolean; onToggle: () => void }) {
+function RunRow({
+  run,
+  open,
+  onToggle,
+  onRemove,
+}: {
+  run: Run;
+  open: boolean;
+  onToggle: () => void;
+  onRemove: () => void;
+}) {
   return (
     <>
       <tr
@@ -194,10 +223,23 @@ function RunRow({ run, open, onToggle }: { run: Run; open: boolean; onToggle: ()
         <Td>
           <StatusPill status={run.status ?? "complete"} approval={run.approval_state} />
         </Td>
-        <Td className="text-faint">
-          <IconChevron
-            className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-90" : "rotate-0 opacity-0 group-hover:opacity-100"}`}
-          />
+        <Td className="text-right">
+          <div className="inline-flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+              title="Remove (permanent)"
+              aria-label="Remove run"
+              className="inline-flex items-center text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-bg hover:bg-hot/10 hover:border-hot/40 hover:text-hot text-muted cursor-pointer"
+            >
+              <IconTrash className="w-3 h-3" />
+            </button>
+            <IconChevron
+              className={`w-3.5 h-3.5 text-faint transition-transform ${open ? "rotate-90" : "rotate-0 opacity-0 group-hover:opacity-100"}`}
+            />
+          </div>
         </Td>
       </tr>
       {open && (

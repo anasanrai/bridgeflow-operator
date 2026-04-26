@@ -7,6 +7,7 @@ import {
   IconRefresh,
   IconSearch,
   IconSettings,
+  IconTrash,
   IconX,
 } from "../lib/icons";
 import {
@@ -112,6 +113,20 @@ export function LeadsTable() {
     }
   };
 
+  const onRemove = async (id: string) => {
+    if (source !== "supabase") {
+      setLeads((rows) => rows.filter((r) => r.id !== id));
+      return;
+    }
+    try {
+      const r = await fetch(`/api/leads/${id}/hard`, { method: "DELETE" });
+      if (!r.ok) throw new Error(await r.text());
+      setLeads((rows) => rows.filter((row) => row.id !== id));
+    } catch (err) {
+      alert("Remove failed: " + (err as Error).message);
+    }
+  };
+
   return (
     <>
       <section className="rounded-xl border border-border bg-surface shadow-inset-hair overflow-hidden">
@@ -200,6 +215,7 @@ export function LeadsTable() {
                     lead={lead}
                     onEdit={() => setEditing(lead)}
                     onArchive={() => onArchive(lead.id)}
+                    onRemove={() => onRemove(lead.id)}
                   />
                 ))
               )}
@@ -249,10 +265,12 @@ function Row({
   lead,
   onEdit,
   onArchive,
+  onRemove,
 }: {
   lead: Lead;
   onEdit: () => void;
   onArchive: () => void;
+  onRemove: () => void;
 }) {
   const archived = (lead.status ?? "").toLowerCase() === "archived";
   return (
@@ -297,14 +315,29 @@ function Row({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`Archive "${lead.name || "this lead"}"?`)) onArchive();
+                if (confirm(`Archive "${lead.name || "this lead"}"? You can show archived leads from the toolbar.`)) onArchive();
               }}
-              title="Archive"
-              className="inline-flex items-center text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-bg hover:bg-hot/10 hover:border-hot/40 hover:text-hot text-muted cursor-pointer"
+              title="Archive (soft — recoverable via 'Show archived')"
+              className="inline-flex items-center text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-bg hover:bg-amber-500/10 hover:border-amber-500/40 hover:text-amber-200 text-muted cursor-pointer"
             >
               <IconArchive className="w-3 h-3" />
             </button>
           )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (
+                confirm(
+                  `Remove "${lead.name || "this lead"}" permanently? This cannot be undone.`
+                )
+              )
+                onRemove();
+            }}
+            title="Remove (permanent)"
+            className="inline-flex items-center text-[10px] font-mono px-1.5 py-0.5 rounded border border-border bg-bg hover:bg-hot/10 hover:border-hot/40 hover:text-hot text-muted cursor-pointer"
+          >
+            <IconTrash className="w-3 h-3" />
+          </button>
         </div>
       </Td>
     </tr>

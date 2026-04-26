@@ -33,9 +33,10 @@ export function TopBar() {
             Opus 4.7
           </span>
           <a
-            href="https://github.com/anthropics/claude-code"
+            href="https://github.com/anasanrai/bridgeflow-operator#readme"
             target="_blank"
             rel="noreferrer"
+            title="Open the BridgeFlow Operator README on GitHub"
             className="text-[11px] px-2 py-1 rounded-md border border-border hover:border-border-strong bg-surface text-muted hover:text-ink transition-colors cursor-pointer"
           >
             Docs

@@ -1244,6 +1244,33 @@ async def archive_lead(lead_id: str) -> JSONResponse:
     return JSONResponse({"lead": saved, "archived": True})
 
 
+@app.delete("/leads/{lead_id}/hard")
+async def remove_lead(lead_id: str) -> JSONResponse:
+    """Hard delete: row is gone. Used by the operator's "Remove" action
+    in /leads — irreversible, separate from the soft-archive default."""
+    client = supabase_client.get_client()
+    if client is None:
+        raise HTTPException(503, "supabase_not_configured")
+    try:
+        client.table("leads").delete().eq("id", lead_id).execute()
+    except Exception as exc:
+        raise HTTPException(500, f"delete_failed: {exc}") from exc
+    return JSONResponse({"id": lead_id, "removed": True})
+
+
+@app.delete("/runs/{run_id}")
+async def remove_run(run_id: str) -> JSONResponse:
+    """Hard delete a pipeline_runs row. Used by /history's Remove action."""
+    client = supabase_client.get_client()
+    if client is None:
+        raise HTTPException(503, "supabase_not_configured")
+    try:
+        client.table("pipeline_runs").delete().eq("id", run_id).execute()
+    except Exception as exc:
+        raise HTTPException(500, f"delete_failed: {exc}") from exc
+    return JSONResponse({"id": run_id, "removed": True})
+
+
 # ── V2 dashboard approvals — same flow as Telegram, just from the UI ────
 
 

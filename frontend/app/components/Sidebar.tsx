@@ -198,8 +198,8 @@ export function Sidebar() {
               }`}
             />
             <span className="flex-1 text-left">Jarvis</span>
-            <span className="text-[9px] font-mono uppercase tracking-wider px-1 py-0.5 rounded border border-accent/35 text-accent bg-accent/10">
-              new
+            <span className="text-[9px] font-mono uppercase tracking-wider px-1 py-0.5 rounded border border-amber-500/40 text-amber-200 bg-amber-500/10">
+              beta
             </span>
           </Link>
           <Link

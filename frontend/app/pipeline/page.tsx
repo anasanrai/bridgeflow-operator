@@ -16,7 +16,7 @@ import {
 } from "../lib/icons";
 import { useAgentStream } from "../lib/useAgentStream";
 
-type Mode = "transcript" | "voice" | "workflow";
+type Mode = "transcript" | "voice" | "describe" | "workflow";
 
 function leadScore(results: ReturnType<typeof useAgentStream>["results"]): string {
   const raw = (results?.qualification as any)?.score;
@@ -86,7 +86,7 @@ export default function PipelinePage() {
 
           <section className="lg:col-span-3 space-y-4">
             {!pipeline.results && !pipeline.running && (
-              <EmptyState mode={mode === "workflow" ? "transcript" : mode} />
+              <EmptyState mode={mode === "voice" ? "voice" : "transcript"} />
             )}
             {pipeline.running && !pipeline.results && <RunningState />}
             {pipeline.results && (
@@ -128,11 +128,17 @@ function ModeTabs({
     { id: "transcript", label: "Transcript", icon: IconPipeline, available: true },
     { id: "voice", label: "Call Recording", icon: IconMic, available: true },
     {
-      id: "workflow",
-      label: "V2 Workflow",
+      id: "describe",
+      label: "Explain your situation",
       icon: IconSparkle,
       accent: "amber",
-      badge: "Building Now",
+      badge: "Coming soon",
+      available: false,
+    },
+    {
+      id: "workflow",
+      label: "Workflow",
+      icon: IconSparkle,
       available: workflowEligible,
     },
   ];

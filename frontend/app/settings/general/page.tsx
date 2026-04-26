@@ -86,11 +86,11 @@ function Header() {
       </h1>
       <p className="text-sm text-muted mt-1 max-w-2xl">
         Pipeline behaviour, notification preferences, and data ops. Settings
-        save to local storage in V2 — V3 promotes them to the
+        persist to local storage today; cross-device sync via the
         <code className="text-[12px] font-mono text-ink-muted ml-1 px-1 rounded border border-border bg-surface">
           company_profiles
         </code>{" "}
-        row so they sync across devices.
+        row is coming soon.
       </p>
     </div>
   );
@@ -238,7 +238,7 @@ function DataPrivacyCard() {
           title="Clear all test data"
           sub="DELETE pipeline_runs / pending_approvals / actions / analyses / leads / calls. Wipes the hackathon demo state."
           buttonLabel="Clear"
-          onClick={() => alert("Wiring DELETE endpoints in V3 — paste this SQL in Supabase for now:\n\ntruncate table pipeline_runs, pending_approvals, actions, analyses, leads, calls cascade;")}
+          onClick={() => alert("Bulk DELETE endpoint coming soon — for now paste this SQL in Supabase:\n\ntruncate table pipeline_runs, pending_approvals, actions, analyses, leads, calls cascade;")}
           subtle
           v3Badge
         />
