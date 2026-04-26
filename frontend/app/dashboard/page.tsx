@@ -13,7 +13,6 @@ import {
   IconUsers,
 } from "../lib/icons";
 import {
-  demoLeads,
   fmtDecision,
   fmtRelative,
   Lead,
@@ -23,25 +22,22 @@ import { ScoreBadge } from "../components/ScoreBadge";
 
 export default function DashboardPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [source, setSource] = useState<"supabase" | "demo">("demo");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch("/api/leads", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { source: "demo", leads: [] }))
+      .then((r) => (r.ok ? r.json() : { source: "supabase", leads: [] }))
       .then((data: LeadsResponse) => {
-        const rows = data.leads?.length ? data.leads : demoLeads();
-        setLeads(rows);
-        setSource(data.leads?.length ? data.source : "demo");
+        setLeads(data.leads ?? []);
       })
       .catch(() => {
-        setLeads(demoLeads());
-        setSource("demo");
+        setLeads([]);
       })
       .finally(() => setLoading(false));
   }, []);
 
   const stats = useMemo(() => computeStats(leads), [leads]);
+  const empty = !loading && leads.length === 0;
 
   return (
     <div className="space-y-6">
@@ -54,17 +50,17 @@ export default function DashboardPage() {
         </div>
         <span
           className={`inline-flex items-center gap-1.5 text-[11px] font-mono px-2 py-1 rounded-md border ${
-            source === "supabase"
-              ? "text-accent border-accent/30 bg-accent/5"
-              : "text-muted border-border bg-surface"
+            empty
+              ? "text-muted border-border bg-surface"
+              : "text-accent border-accent/30 bg-accent/5"
           }`}
         >
           <span
             className={`w-1.5 h-1.5 rounded-full ${
-              source === "supabase" ? "bg-accent" : "bg-faint"
+              empty ? "bg-faint" : "bg-accent shadow-glow-accent"
             }`}
           />
-          {source === "supabase" ? "live · supabase" : "demo data"}
+          {empty ? "no data yet" : "live · supabase"}
         </span>
       </div>
 

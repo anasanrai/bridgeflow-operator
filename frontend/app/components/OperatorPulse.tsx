@@ -293,7 +293,7 @@ function PulseHeader({
                   live ? "bg-accent shadow-glow-accent animate-blink" : "bg-faint"
                 }`}
               />
-              {live ? "live" : runs > 0 ? "demo data" : loading ? "loading…" : "no data"}
+              {live ? "live" : loading ? "loading…" : "no data yet"}
             </span>
           </div>
           <p className="text-xs text-muted mt-0.5">

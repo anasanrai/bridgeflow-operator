@@ -11,7 +11,6 @@ import {
   IconX,
 } from "../lib/icons";
 import {
-  demoLeads,
   fmtDecision,
   fmtRelative,
   Lead,
@@ -24,7 +23,7 @@ type ScoreFilter = (typeof SCORES)[number];
 
 export function LeadsTable() {
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [source, setSource] = useState<"supabase" | "demo">("demo");
+  const [source, setSource] = useState<"supabase" | "demo">("supabase");
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ScoreFilter>("all");
@@ -35,15 +34,14 @@ export function LeadsTable() {
     setLoading(true);
     const qs = showArchived ? "?include_archived=1" : "";
     fetch(`/api/leads${qs}`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : { source: "demo", leads: [] }))
+      .then((r) => (r.ok ? r.json() : { source: "supabase", leads: [] }))
       .then((data: LeadsResponse) => {
-        const rows = data.leads?.length ? data.leads : demoLeads();
-        setLeads(rows);
-        setSource(data.leads?.length ? data.source : "demo");
+        setLeads(data.leads ?? []);
+        setSource(data.source ?? "supabase");
       })
       .catch(() => {
-        setLeads(demoLeads());
-        setSource("demo");
+        setLeads([]);
+        setSource("supabase");
       })
       .finally(() => setLoading(false));
   };
@@ -202,6 +200,25 @@ export function LeadsTable() {
             <tbody className="divide-y divide-border">
               {loading && leads.length === 0 ? (
                 <SkeletonRows />
+              ) : leads.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center">
+                    <div className="mx-auto max-w-sm flex flex-col items-center gap-2">
+                      <div className="w-10 h-10 rounded-full bg-bg border border-border text-muted flex items-center justify-center">
+                        <IconSearch className="w-4 h-4" />
+                      </div>
+                      <div className="text-sm font-medium text-ink">No leads yet</div>
+                      <div className="text-[12px] text-muted leading-relaxed">
+                        Run your first pipeline on{" "}
+                        <a href="/pipeline" className="text-accent hover:underline">
+                          /pipeline
+                        </a>{" "}
+                        — every prospect that lands will show up here, scored,
+                        decided, and timestamped.
+                      </div>
+                    </div>
+                  </td>
+                </tr>
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-5 py-10 text-center text-muted text-sm">
@@ -235,17 +252,17 @@ export function LeadsTable() {
           </span>
           <span
             className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border ${
-              source === "supabase"
+              leads.length > 0
                 ? "text-accent border-accent/30 bg-accent/5"
                 : "text-muted border-border bg-bg"
             }`}
           >
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                source === "supabase" ? "bg-accent" : "bg-faint"
+                leads.length > 0 ? "bg-accent shadow-glow-accent" : "bg-faint"
               }`}
             />
-            {source === "supabase" ? "live · supabase" : "demo data"}
+            {leads.length > 0 ? "live · supabase" : "no data yet"}
           </span>
         </div>
       </section>
