@@ -36,6 +36,7 @@ import {
   resolvePersona,
   useJarvisSettings,
 } from "../lib/jarvisSettings";
+import { useWakeListener } from "../lib/wakeListener";
 
 interface Msg {
   id: string;
@@ -77,6 +78,11 @@ export function JarvisOverlay() {
   const enqueuedCountRef = useRef(0);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Tail of recently-spoken text — used by wake listener to filter echo
+  // bleed-through (when SR re-recognizes Jarvis's own voice through the
+  // speaker as if the user said it). Refreshed every sentence.
+  const [speakingTail, setSpeakingTail] = useState("");
+
   const stopAllAudio = useCallback(() => {
     try {
       currentAudioRef.current?.pause();
@@ -91,6 +97,7 @@ export function JarvisOverlay() {
     nextPlayIndexRef.current = 0;
     enqueuedCountRef.current = 0;
     setSpeakingNow(false);
+    setSpeakingTail("");
   }, []);
 
   const playNextInQueue = useCallback(() => {
@@ -139,6 +146,13 @@ export function JarvisOverlay() {
       const trimmed = sentence.trim();
       if (!trimmed) return;
       if (!settings.voice_enabled) return;
+
+      // Update the speakingTail so the wake listener can filter echo.
+      // We keep the most recent ~30 words.
+      setSpeakingTail((prev) => {
+        const combined = (prev + " " + trimmed).split(/\s+/).filter(Boolean);
+        return combined.slice(-30).join(" ");
+      });
 
       // Browser provider: fall back to SpeechSynthesis (no streaming, but
       // saves the operator from configuring ElevenLabs).
@@ -482,6 +496,47 @@ export function JarvisOverlay() {
     sendRef.current = send;
   }, [send]);
 
+  // ── Always-on wake-word listener + barge-in ─────────────────────────
+  // Aborts the in-flight LLM stream + audio when the user interrupts.
+  const handleInterrupt = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    stopAllAudio();
+    setStreaming(false);
+  }, [stopAllAudio]);
+
+  const wakeListener = useWakeListener({
+    enabled: settings.always_on,
+    wakeWord: settings.wake_word || "jarvis",
+    onCommand: (cmd) => {
+      // Make sure the panel is visible so the operator can see the
+      // command being processed.
+      setOpen(true);
+      void sendRef.current(cmd);
+    },
+    speakingNow,
+    speakingTail,
+    onInterrupt: handleInterrupt,
+    bargeIn: settings.barge_in,
+  });
+
+  // Attempt to start the listener on mount when always-on is enabled AND
+  // permission was previously granted (subsequent mounts don't need a
+  // user gesture). The first-ever start needs a click — surfaced via the
+  // "Enable wake word" button below.
+  useEffect(() => {
+    if (!settings.always_on) {
+      wakeListener.stop();
+      return;
+    }
+    if (wakeListener.unsupported) return;
+    // Best-effort: try to start. If browser blocks (no prior permission),
+    // we silently leave it in "off" state and the UI shows the enable
+    // button.
+    wakeListener.start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.always_on]);
+
   // ── Greeting on /dashboard, once per session ────────────────────────
   useEffect(() => {
     if (pathname !== "/dashboard") return;
@@ -532,6 +587,20 @@ export function JarvisOverlay() {
     [messages]
   );
 
+  // Wake-word state derived label (used by header + FAB).
+  const wakeAwake = wakeListener.state === "awake";
+  const wakeIdle = wakeListener.state === "idle";
+  const wakeDot =
+    listening || wakeAwake
+      ? "bg-hot animate-blink shadow-glow-hot"
+      : speakingNow
+      ? "bg-accent animate-blink shadow-glow-accent"
+      : streaming
+      ? "bg-warm animate-blink"
+      : wakeIdle
+      ? "bg-accent shadow-glow-accent"
+      : "bg-faint";
+
   return (
     <div className="fixed bottom-4 right-4 z-[60] pointer-events-none">
       <div className="pointer-events-auto">
@@ -543,7 +612,7 @@ export function JarvisOverlay() {
             send={() => void send(input)}
             streaming={streaming}
             speakingNow={speakingNow}
-            listening={listening}
+            listening={listening || wakeAwake}
             startListening={startListening}
             stopListening={stopListening}
             voiceErr={voiceErr}
@@ -551,6 +620,13 @@ export function JarvisOverlay() {
             onClose={() => setOpen(false)}
             onReset={reset}
             onKeyDown={onKeyDown}
+            wakeState={wakeListener.state}
+            wakeInterim={wakeListener.interim}
+            wakeUnsupported={wakeListener.unsupported}
+            wakePermissionDenied={wakeListener.permissionDenied}
+            alwaysOn={settings.always_on}
+            wakeWord={settings.wake_word || "jarvis"}
+            onEnableWake={() => wakeListener.start()}
             providerLabel={
               settings.provider === "elevenlabs" ? "elevenlabs · daniel" : "browser tts"
             }
@@ -559,7 +635,9 @@ export function JarvisOverlay() {
           <JarvisFab
             streaming={streaming}
             speakingNow={speakingNow}
-            listening={listening}
+            listening={listening || wakeAwake}
+            wakeIdle={wakeIdle}
+            wakeDot={wakeDot}
             onOpen={() => setOpen(true)}
           />
         )}
@@ -574,31 +652,36 @@ function JarvisFab({
   streaming,
   speakingNow,
   listening,
+  wakeIdle,
+  wakeDot,
   onOpen,
 }: {
   streaming: boolean;
   speakingNow: boolean;
   listening: boolean;
+  wakeIdle: boolean;
+  wakeDot: string;
   onOpen: () => void;
 }) {
+  const tooltip = listening
+    ? "Listening…"
+    : speakingNow
+    ? "Speaking…"
+    : streaming
+    ? "Thinking…"
+    : wakeIdle
+    ? 'Always-on. Say "Jarvis" to talk.'
+    : "Open Jarvis";
   return (
     <button
       onClick={onOpen}
-      title="Ask Jarvis"
+      title={tooltip}
       aria-label="Open Jarvis assistant"
       className="group relative w-14 h-14 rounded-full border border-accent/40 bg-bg/95 backdrop-blur shadow-glow-accent text-accent hover:text-ink hover:bg-accent/10 transition-colors cursor-pointer flex items-center justify-center"
     >
       <IconLogo className="w-6 h-6" />
       <span
-        className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-bg ${
-          listening
-            ? "bg-hot animate-blink"
-            : speakingNow
-            ? "bg-accent animate-blink shadow-glow-accent"
-            : streaming
-            ? "bg-warm animate-blink"
-            : "bg-accent shadow-glow-accent"
-        }`}
+        className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-bg ${wakeDot}`}
       />
       {(speakingNow || listening) && (
         <span className="absolute inset-0 rounded-full pointer-events-none">
@@ -607,6 +690,11 @@ function JarvisFab({
               listening ? "bg-hot/30" : "bg-accent/30"
             } animate-ping`}
           />
+        </span>
+      )}
+      {wakeIdle && !speakingNow && !listening && (
+        <span className="absolute inset-0 rounded-full pointer-events-none">
+          <span className="absolute inset-0 rounded-full bg-accent/15 animate-ping" />
         </span>
       )}
     </button>
@@ -631,6 +719,13 @@ function JarvisPanel({
   onReset,
   onKeyDown,
   providerLabel,
+  wakeState,
+  wakeInterim,
+  wakeUnsupported,
+  wakePermissionDenied,
+  alwaysOn,
+  wakeWord,
+  onEnableWake,
 }: {
   messages: Msg[];
   input: string;
@@ -647,7 +742,28 @@ function JarvisPanel({
   onReset: () => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   providerLabel: string;
+  wakeState: "off" | "idle" | "awake" | "processing";
+  wakeInterim: string;
+  wakeUnsupported: boolean;
+  wakePermissionDenied: boolean;
+  alwaysOn: boolean;
+  wakeWord: string;
+  onEnableWake: () => void;
 }) {
+  const showEnableWake =
+    alwaysOn && !wakeUnsupported && wakeState === "off" && !wakePermissionDenied;
+  const wakeStatusLabel =
+    wakeState === "awake"
+      ? "wake heard · listening"
+      : wakeState === "processing"
+      ? "processing"
+      : wakeState === "idle"
+      ? `always-on · say "${wakeWord}"`
+      : alwaysOn && wakeUnsupported
+      ? "wake word unsupported in this browser"
+      : alwaysOn && wakePermissionDenied
+      ? "mic permission denied"
+      : "always-on off";
   return (
     <section
       role="dialog"
@@ -683,6 +799,8 @@ function JarvisPanel({
                 ? "speaking…"
                 : streaming
                 ? "thinking…"
+                : alwaysOn && (wakeState === "idle" || wakeState === "awake" || wakeState === "processing")
+                ? wakeStatusLabel
                 : providerLabel}
             </div>
           </div>
@@ -716,6 +834,34 @@ function JarvisPanel({
       </header>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin px-4 py-3 space-y-3">
+        {showEnableWake && (
+          <div className="rounded-lg border border-accent/40 bg-accent/[0.06] p-3 mb-1">
+            <div className="text-[12px] font-semibold text-accent mb-1">
+              Enable wake word
+            </div>
+            <div className="text-[11px] text-ink-muted leading-relaxed">
+              Tap below once to grant mic access. After that, just say
+              <span className="text-accent font-mono"> "{wakeWord}"</span> from anywhere on the page and Jarvis will respond — Alexa-style.
+            </div>
+            <button
+              onClick={onEnableWake}
+              className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-md border border-accent/45 bg-accent/[0.10] text-accent hover:bg-accent/[0.18] cursor-pointer shadow-glow-accent"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent" />
+              Tap to enable always-on
+            </button>
+          </div>
+        )}
+        {wakeState === "awake" && wakeInterim && (
+          <div className="rounded-lg border border-hot/35 bg-hot/[0.04] px-3 py-2">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-hot/80 mb-0.5">
+              hearing you
+            </div>
+            <div className="text-[12px] text-ink-muted leading-relaxed">
+              {wakeInterim}
+            </div>
+          </div>
+        )}
         {messages.length === 0 ? (
           <EmptyState onPick={(q) => setInput(q)} />
         ) : (

@@ -21,7 +21,10 @@ import httpx
 
 # Daniel — British, mature, calm — closest single-voice match to JARVIS.
 DEFAULT_VOICE_ID = "onwK4e9ZLuTAKqWW03F9"
-DEFAULT_MODEL_ID = "eleven_turbo_v2_5"
+# Flash v2.5 has ~75ms first-byte latency vs ~250ms for turbo.
+# Quality drop is small; the latency win is huge for barge-in scenarios
+# where we frequently stop and restart audio mid-sentence.
+DEFAULT_MODEL_ID = "eleven_flash_v2_5"
 TIMEOUT = httpx.Timeout(60.0, connect=10.0, read=60.0)
 
 DEFAULT_VOICE_SETTINGS = {

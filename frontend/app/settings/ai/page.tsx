@@ -106,6 +106,7 @@ export default function AISettingsPage() {
             testing={testing}
             testMsg={testMsg}
           />
+          <ConversationCard settings={settings} update={update} />
           <PersonalityCard
             settings={settings}
             update={update}
@@ -341,6 +342,85 @@ function VoicePick({
         {voice.description}
       </div>
     </button>
+  );
+}
+
+// ── Conversation card (always-on + wake word + barge-in) ──────────────
+
+function ConversationCard({
+  settings,
+  update,
+}: {
+  settings: ReturnType<typeof useJarvisSettings>[0];
+  update: ReturnType<typeof useJarvisSettings>[1];
+}) {
+  const [draftWake, setDraftWake] = useState(settings.wake_word);
+  useEffect(() => setDraftWake(settings.wake_word), [settings.wake_word]);
+
+  return (
+    <Section title="Conversation" icon={<IconSparkle className="w-4 h-4" />}>
+      <div className="rounded-lg border border-border bg-bg/40 p-3 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[12px] font-semibold text-ink">Always-on listening</div>
+          <div className="text-[11px] text-muted mt-0.5 leading-relaxed max-w-xl">
+            Keep the mic open in the background. Jarvis stays silent until
+            you say the wake word — then activates and listens to your full
+            command. Like Alexa or Siri.
+          </div>
+          <div className="text-[10px] text-faint mt-1.5 leading-relaxed">
+            Browser blocks the very first start without a click. The Jarvis
+            panel shows a one-tap "Enable always-on" button the first time;
+            after that it auto-starts on every page load.
+          </div>
+        </div>
+        <Toggle
+          value={settings.always_on}
+          onChange={(v) => update({ always_on: v })}
+        />
+      </div>
+
+      <div className="rounded-lg border border-border bg-bg/40 p-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-faint">
+            Wake word
+          </div>
+          <span className="text-[10px] font-mono text-faint">
+            lowercase · keep it distinctive
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            value={draftWake}
+            onChange={(e) => setDraftWake(e.target.value.toLowerCase())}
+            onBlur={() =>
+              update({ wake_word: draftWake.trim().toLowerCase() || "jarvis" })
+            }
+            placeholder="jarvis"
+            disabled={!settings.always_on}
+            className="flex-1 rounded-md bg-bg border border-border px-3 py-1.5 text-[13px] font-mono text-ink placeholder:text-faint focus:outline-none focus:border-accent/45 disabled:opacity-50"
+          />
+          <span className="text-[11px] text-muted">
+            try: jarvis · friday · operator
+          </span>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-bg/40 p-3 flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-[12px] font-semibold text-ink">Barge-in</div>
+          <div className="text-[11px] text-muted mt-0.5 leading-relaxed max-w-xl">
+            Interrupt Jarvis mid-sentence by speaking. Jarvis will stop
+            talking, listen, and respond to the new input — no need to wait
+            for the response to finish. Echo filtering reduces false
+            triggers from your own speakers; not perfect.
+          </div>
+        </div>
+        <Toggle
+          value={settings.barge_in}
+          onChange={(v) => update({ barge_in: v })}
+        />
+      </div>
+    </Section>
   );
 }
 

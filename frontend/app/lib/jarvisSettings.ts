@@ -88,6 +88,9 @@ export interface JarvisSettings {
   personality_id: string;    // one of PERSONALITY_PRESETS.id, "custom" allowed
   custom_persona: string;    // free-form, used when personality_id="custom"
   voice_enabled: boolean;    // master mute for TTS
+  always_on: boolean;        // continuous mic + wake-word activation
+  wake_word: string;         // lowercase phrase to listen for, e.g. "jarvis"
+  barge_in: boolean;         // user can interrupt Jarvis mid-sentence
 }
 
 export const DEFAULT_SETTINGS: JarvisSettings = {
@@ -96,6 +99,9 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
   personality_id: "jarvis",
   custom_persona: "",
   voice_enabled: true,
+  always_on: true,           // ON by default — operator wanted Alexa/Siri behaviour
+  wake_word: "jarvis",
+  barge_in: true,
 };
 
 const STORAGE_KEY = "bridgeflow.jarvis.settings.v1";
