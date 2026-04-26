@@ -1178,12 +1178,191 @@ async def workflow_refine(req: WorkflowRefineRequest):
     )
 
 
+# ── Credential registry: n8n credential type id → (display, env config_key,
+#    where_to_get hint, placeholder). config_key maps to the same flags
+#    /config returns; None means "we don't track this in /config" so it
+#    will always render as 'unknown' (treated as missing-needs-attention).
+_N8N_CRED_REGISTRY: dict[str, tuple[str, str | None, str, str]] = {
+    "anthropicApi": (
+        "Anthropic API",
+        "anthropic",
+        "https://console.anthropic.com/settings/keys",
+        "sk-ant-api03-***",
+    ),
+    "resendApi": (
+        "Resend API",
+        "resend",
+        "https://resend.com/api-keys",
+        "re_***",
+    ),
+    "telegramApi": (
+        "Telegram Bot",
+        "telegram",
+        "Talk to @BotFather on Telegram → /newbot, copy the HTTP API token",
+        "123456789:AAH***",
+    ),
+    "groqApi": (
+        "Groq API",
+        "groq",
+        "https://console.groq.com/keys",
+        "gsk_***",
+    ),
+    "hubspotApi": (
+        "HubSpot Private App",
+        "hubspot",
+        "HubSpot → Settings → Integrations → Private Apps",
+        "pat-***",
+    ),
+    "supabaseApi": (
+        "Supabase",
+        "supabase",
+        "Supabase project → Settings → API",
+        "https://your-project.supabase.co",
+    ),
+    "openAiApi": (
+        "OpenAI",
+        None,
+        "https://platform.openai.com/api-keys",
+        "sk-***",
+    ),
+    "googleCalendarOAuth2Api": (
+        "Google Calendar",
+        None,
+        "Google Cloud Console → enable Calendar API + OAuth client",
+        "OAuth credentials JSON",
+    ),
+    "calendlyApi": (
+        "Calendly API",
+        None,
+        "https://calendly.com/integrations/api_webhooks",
+        "eyJraWQiOi***",
+    ),
+    "gmailOAuth2": (
+        "Gmail",
+        None,
+        "Google Cloud Console → enable Gmail API + OAuth client",
+        "OAuth credentials JSON",
+    ),
+    "smtp": (
+        "SMTP / Email",
+        None,
+        "Use your SMTP host's host, port, username, password",
+        "user@example.com / app password",
+    ),
+    "slackApi": (
+        "Slack",
+        None,
+        "Slack admin → Apps → install bot, copy bot token",
+        "xoxb-***",
+    ),
+    "httpHeaderAuth": (
+        "HTTP Header Auth",
+        None,
+        "n8n Credentials → Generic Auth → Header Auth (set Authorization to your bearer token)",
+        "Bearer xxxxxxxxxxxxxxxx",
+    ),
+    "httpBasicAuth": (
+        "HTTP Basic Auth",
+        None,
+        "n8n Credentials → Generic Auth → Basic Auth (username + password)",
+        "user / pass",
+    ),
+}
+
+
+def _extract_workflow_credential_types(workflow: dict) -> list[dict]:
+    """Walk every node and collect every credential type referenced.
+    Returns deterministic baseline so the LLM can't omit a credential."""
+    seen: dict[str, dict] = {}
+    for node in (workflow or {}).get("nodes", []) or []:
+        creds = (node or {}).get("credentials") or {}
+        if not isinstance(creds, dict):
+            continue
+        for cred_type, ref in creds.items():
+            key = str(cred_type)
+            if key in seen:
+                continue
+            ref_name: str | None = None
+            if isinstance(ref, dict):
+                ref_name = ref.get("name") or None
+            seen[key] = {"type": key, "name": ref_name}
+    return list(seen.values())
+
+
+def _config_flags() -> dict[str, bool]:
+    """Mirror of /config — used to mark each credential configured/missing."""
+    return {
+        "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "supabase": supabase_client.get_client() is not None,
+        "resend": bool(os.environ.get("RESEND_API_KEY")),
+        "telegram": telegram_configured(),
+        "groq": groq_configured(),
+        "hubspot": hubspot_configured(),
+        "elevenlabs": elevenlabs_configured(),
+    }
+
+
+def _annotate_credentials(items: list[dict]) -> list[dict]:
+    """Augment each credential entry with display name + configured status.
+    Items without a known registry mapping fall back to the LLM-supplied
+    name + where_to_get; configured stays False (treated as missing)."""
+    cfg = _config_flags()
+    out: list[dict] = []
+    for raw in items:
+        cred_type = str(raw.get("type") or "").strip()
+        info = _N8N_CRED_REGISTRY.get(cred_type)
+        if info is not None:
+            display, config_key, where_to_get, placeholder = info
+        else:
+            display = raw.get("name") or cred_type or "credential"
+            config_key = None
+            where_to_get = raw.get("where_to_get") or "Configure in n8n credential manager."
+            placeholder = raw.get("placeholder") or ""
+        configured = bool(cfg.get(config_key)) if config_key else False
+        out.append(
+            {
+                "type": cred_type,
+                "name": raw.get("name") or display,
+                "where_to_get": raw.get("where_to_get") or where_to_get,
+                "placeholder": raw.get("placeholder") or placeholder,
+                "required": True if raw.get("required") is None else bool(raw.get("required")),
+                "configured": configured,
+                "config_key": config_key,
+            }
+        )
+    return out
+
+
 @app.post("/credentials")
 async def credentials(req: CredentialsRequest) -> JSONResponse:
-    """V2 — Opus 4.7 enumerates the credentials the workflow needs to run."""
+    """V2 — list every credential the workflow needs. Combines an Opus 4.7
+    enumeration (rich `where_to_get` text) with a deterministic walk over
+    workflow.nodes[].credentials so nothing the workflow uses can be
+    silently omitted. Each entry is then annotated with `configured`
+    against the live integrations config so the operator sees which are
+    missing on this Operator instance."""
     out = await _run_json_agent(
         CREDENTIALS_SYSTEM, build_credentials_user(req.workflow), "credentials"
     )
+    llm_items = list(out.get("credentials") or []) if isinstance(out, dict) else []
+
+    # Merge with deterministic walk: any cred_type the workflow references
+    # but the LLM dropped gets added.
+    by_type: dict[str, dict] = {}
+    for it in llm_items:
+        if not isinstance(it, dict):
+            continue
+        t = str(it.get("type") or "").strip()
+        if t and t not in by_type:
+            by_type[t] = it
+    for wc in _extract_workflow_credential_types(req.workflow):
+        t = wc["type"]
+        if t not in by_type:
+            by_type[t] = wc
+
+    annotated = _annotate_credentials(list(by_type.values()))
+    out = {"credentials": annotated}
+
     if req.call_id:
         supabase_client.insert_workflow_draft(
             req.call_id, None, req.workflow, out, None, platform="n8n"

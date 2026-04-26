@@ -415,13 +415,30 @@ function CredentialsCard({
   credentials: CredentialItem[] | null;
   status: StepStatus;
 }) {
+  const total = credentials?.length ?? 0;
+  const configured = (credentials || []).filter((c) => c.configured).length;
+  const missing = total - configured;
   return (
     <Card
       title="Credential checklist"
-      subtitle="What the operator must wire up in n8n before importing."
+      subtitle="Every credential the workflow needs. Green = already in your env. Red = missing."
       icon={<IconKey className="w-4 h-4" />}
       status={status}
       empty={!credentials || credentials.length === 0}
+      headerExtra={
+        total > 0 ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+              {configured} configured
+            </span>
+            {missing > 0 && (
+              <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-hot/40 text-hot bg-hot/10">
+                {missing} missing
+              </span>
+            )}
+          </div>
+        ) : null
+      }
     >
       {credentials && credentials.length > 0 && (
         <ul className="space-y-2">
@@ -447,36 +464,61 @@ function CredentialRow({ cred }: { cred: CredentialItem }) {
     }
   };
 
+  const configured = cred.configured === true;
+  const wrapTone = configured
+    ? "border-accent/35 bg-accent/[0.04]"
+    : "border-hot/35 bg-hot/[0.04]";
+  const statusBadge = configured ? (
+    <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+      <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent" />
+      configured
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-hot/40 text-hot bg-hot/10">
+      <span className="w-1.5 h-1.5 rounded-full bg-hot" />
+      missing
+    </span>
+  );
+
   return (
-    <li className="rounded-md border border-border bg-bg/40 p-3">
+    <li className={`rounded-md border p-3 ${wrapTone}`}>
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 min-w-0">
           <span
             className={`inline-flex items-center justify-center w-5 h-5 rounded border text-[10px] font-mono ${
-              cred.required
-                ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-                : "border-border bg-surface text-faint"
+              configured
+                ? "border-accent/40 bg-accent/10 text-accent"
+                : "border-hot/40 bg-hot/10 text-hot"
             }`}
+            aria-hidden
           >
-            {cred.required ? "!" : "·"}
+            {configured ? "✓" : "!"}
           </span>
           <span className="text-sm font-medium text-ink truncate">{cred.name}</span>
           <span className="text-[10px] font-mono text-faint px-1.5 py-0.5 rounded border border-border">
             {cred.type}
           </span>
+          {!cred.required && (
+            <span className="text-[9px] font-mono uppercase tracking-wider px-1 py-0.5 rounded border border-border text-faint">
+              optional
+            </span>
+          )}
         </div>
-        {cred.placeholder && (
-          <button
-            onClick={handleCopy}
-            className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors cursor-pointer ${
-              copied
-                ? "border-accent/40 bg-accent/10 text-accent"
-                : "border-border bg-bg hover:bg-surface-2 text-muted hover:text-ink"
-            }`}
-          >
-            {copied ? "copied" : "copy placeholder"}
-          </button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {statusBadge}
+          {cred.placeholder && (
+            <button
+              onClick={handleCopy}
+              className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors cursor-pointer ${
+                copied
+                  ? "border-accent/40 bg-accent/10 text-accent"
+                  : "border-border bg-bg hover:bg-surface-2 text-muted hover:text-ink"
+              }`}
+            >
+              {copied ? "copied" : "copy placeholder"}
+            </button>
+          )}
+        </div>
       </div>
       <p className="mt-1.5 text-[12px] text-ink-muted leading-relaxed">
         {cred.where_to_get}
@@ -1518,22 +1560,6 @@ function WorkflowJsonCard({
       headerExtra={
         workflow && (
           <div className="flex items-center gap-1.5 flex-wrap justify-end">
-            <button
-              onClick={() => showToast("Zapier export coming in V3")}
-              title="Available in V3"
-              className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded-md border border-border bg-bg text-faint hover:text-ink hover:bg-surface-2 transition-colors cursor-pointer"
-            >
-              <IconLock className="w-3 h-3 text-amber-300/80" />
-              Export for Zapier <span className="text-amber-300/80">(V3)</span>
-            </button>
-            <button
-              onClick={() => showToast("Make export coming in V3")}
-              title="Available in V3"
-              className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded-md border border-border bg-bg text-faint hover:text-ink hover:bg-surface-2 transition-colors cursor-pointer"
-            >
-              <IconLock className="w-3 h-3 text-amber-300/80" />
-              Export for Make <span className="text-amber-300/80">(V3)</span>
-            </button>
             <button
               onClick={downloadJson}
               className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-md border border-amber-500/40 bg-amber-500/[0.06] text-amber-200 hover:bg-amber-500/[0.12] transition-colors cursor-pointer"

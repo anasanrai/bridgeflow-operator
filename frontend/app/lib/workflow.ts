@@ -50,6 +50,12 @@ export interface CredentialItem {
   where_to_get: string;
   required: boolean;
   placeholder?: string;
+  /** Whether this credential is already configured in the operator's
+   *  Railway env. Falls back to false for any credential type that
+   *  isn't tracked in /config (e.g. SMTP, Calendly, Google Calendar). */
+  configured?: boolean;
+  /** /config flag this credential maps to, if any (e.g. "telegram"). */
+  config_key?: string | null;
 }
 
 export interface CredentialsResponse {
