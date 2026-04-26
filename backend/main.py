@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -581,8 +582,10 @@ def _jarvis_live_context() -> dict:
         "telegram": telegram_configured(),
         "groq": groq_configured(),
         "hubspot": hubspot_configured(),
+        "elevenlabs": elevenlabs_configured(),
     }
     integrations_live = sum(1 for v in cfg.values() if v)
+    integrations_total = len(cfg)
 
     runs = supabase_client.list_pipeline_runs(limit=10) or []
     pending = supabase_client.list_pending_approvals(status="pending", limit=20) or []
@@ -607,9 +610,41 @@ def _jarvis_live_context() -> dict:
     except Exception:
         pass
 
+    # Time-of-day + last-activity recency give Jarvis something concrete to
+    # observe even on an empty system. UTC — Jarvis can phrase as
+    # "morning / afternoon / evening" relative to the operator if needed.
+    now = datetime.now(timezone.utc)
+    hour = now.hour
+    if 5 <= hour < 12:
+        time_of_day = "morning"
+    elif 12 <= hour < 17:
+        time_of_day = "afternoon"
+    elif 17 <= hour < 22:
+        time_of_day = "evening"
+    else:
+        time_of_day = "late night"
+
+    last_run_at = runs[0].get("created_at") if runs else None
+    last_run_minutes_ago: int | None = None
+    if last_run_at:
+        try:
+            t = datetime.fromisoformat(str(last_run_at).replace("Z", "+00:00"))
+            last_run_minutes_ago = max(0, int((now - t).total_seconds() / 60))
+        except Exception:
+            last_run_minutes_ago = None
+
+    is_empty_system = (
+        lead_counts["total"] == 0
+        and len(runs) == 0
+        and len(pending) == 0
+    )
+
     return {
+        "now_utc": now.isoformat(),
+        "time_of_day": time_of_day,
+        "is_empty_system": is_empty_system,
         "integrations": cfg,
-        "integrations_live_count": f"{integrations_live}/6",
+        "integrations_live_count": f"{integrations_live}/{integrations_total}",
         "recent_runs": [
             {
                 "prospect": r.get("prospect_name"),
@@ -621,6 +656,7 @@ def _jarvis_live_context() -> dict:
             }
             for r in runs[:5]
         ],
+        "last_run_minutes_ago": last_run_minutes_ago,
         "pending_approvals_count": len(pending),
         "pending_approval_subjects": [
             (p.get("email_payload") or {}).get("subject") for p in pending[:3]
@@ -661,16 +697,95 @@ async def jarvis(req: JarvisRequest) -> StreamingResponse:
         {"role": m.role, "content": m.content} for m in req.conversation_history
     ]
     if req.kind == "greeting":
+        # Pre-scan LIVE CONTEXT for concrete observation hooks so the greeting
+        # has something specific to lead with — even on an empty system.
+        empty = bool(context.get("is_empty_system"))
+        time_of_day = context.get("time_of_day") or "today"
+        last_run_min = context.get("last_run_minutes_ago")
+        pending_n = context.get("pending_approvals_count") or 0
+        leads_total = (context.get("leads") or {}).get("total") or 0
+        leads_hot = (context.get("leads") or {}).get("hot") or 0
+        page = req.current_page or "/dashboard"
+
+        # Build the observation menu Jarvis must pick from. Order matters —
+        # most action-relevant first. The model is told to pick exactly one,
+        # so back-to-back greetings vary naturally.
+        observation_menu = []
+        if pending_n > 0:
+            observation_menu.append(
+                f"{pending_n} email{'s' if pending_n != 1 else ''} sitting in /review waiting for approval"
+            )
+        if leads_hot > 0:
+            observation_menu.append(
+                f"{leads_hot} HOT lead{'s' if leads_hot != 1 else ''} on the board"
+            )
+        if last_run_min is not None and last_run_min < 60:
+            observation_menu.append(
+                f"the last pipeline run finished {last_run_min} min ago"
+            )
+        elif last_run_min is not None:
+            hours = last_run_min // 60
+            observation_menu.append(
+                f"the last run was {hours}h ago — board's been quiet"
+            )
+        if empty:
+            observation_menu.append(
+                "the system is a clean slate — no runs, no leads, no queue"
+            )
+            observation_menu.append(
+                f"this is a fresh BridgeFlow Operator install on {page}"
+            )
+        observation_menu.append(
+            f"it's {time_of_day} on {page}"
+        )
+
+        # Variety pool for the closing call-to-action. The model is told to
+        # pick the one most relevant, but rotating the pool prevents the
+        # "Want to load the demo?" loop the operator was seeing.
+        if empty:
+            cta_pool = [
+                "load the Real estate · HOT demo on /pipeline",
+                "load the Med spa · WARM demo so we can see the nurture path",
+                "load the SaaS founder · COLD demo and watch the disqualify logic",
+                "drop me on /settings/company to set the identity vault first",
+                "wire a real lead source — paste a transcript on /pipeline",
+            ]
+        else:
+            cta_pool = [
+                "open /review and clear the approval queue",
+                "look at /history for what landed in the last 24h",
+                "open /leads and triage the HOT ones",
+                "queue another transcript on /pipeline",
+                "head to /dashboard for the full pulse",
+            ]
+
         messages.append(
             {
                 "role": "user",
                 "content": (
-                    "(System bootstrap — the operator just opened the dashboard. "
-                    "Greet them briefly using their company name if known, then "
-                    "name 1-2 specific things from the live context they should "
-                    "know about right now — e.g. pending approvals, recent HOT "
-                    "leads, integration warnings. End with a short open question. "
-                    "Keep it under 3 sentences.)"
+                    "(System bootstrap — the operator just opened the console "
+                    f"on {page}. This is a greeting, not a question.\n\n"
+                    "Your job in this single turn: deliver a sharp live-status "
+                    "briefing that feels like a colleague who has been watching "
+                    "the system, not a chatbot reading a template.\n\n"
+                    "STRICT RULES:\n"
+                    "1. Do NOT begin with 'Welcome back' or any generic greeting. "
+                    "Open with an observation about the actual state.\n"
+                    "2. Lead with ONE specific datapoint from the observation "
+                    "menu below — pick the one that matters most right now. "
+                    "Reference it concretely (number, name, or page).\n"
+                    "3. Close with ONE concrete next move — pick from the cta "
+                    "pool, or improvise something better tied to what you "
+                    "observed. Vary the verb across visits.\n"
+                    "4. 2 sentences max. Spoken aloud — write for the ear.\n"
+                    "5. Address the operator naturally — at most once.\n"
+                    "6. Never repeat the framing of a prior greeting in this "
+                    "conversation history.\n\n"
+                    f"Observation menu (pick ONE):\n- "
+                    + "\n- ".join(observation_menu)
+                    + "\n\nCTA pool (pick ONE, or improvise from observed state):\n- "
+                    + "\n- ".join(cta_pool)
+                    + ")"
                 ),
             }
         )
