@@ -338,6 +338,7 @@ export function useWorkflowGenerator() {
 
       setState((s) => ({ ...s, running: false }));
     } catch (err) {
+      // (auto-loop wraps this catch — see below)
       if ((err as any)?.name === "AbortError") return;
       setState((s) => {
         const next = { ...s, running: false, error: (err as Error).message };
@@ -350,5 +351,75 @@ export function useWorkflowGenerator() {
     }
   }, []);
 
-  return { ...state, generate, reset };
+  /** Manual refine — triggered by the "Refine again" button in the
+   *  WorkflowTab header. Takes the current workflow + the most recent
+   *  validation issues and asks Opus 4.7 to apply blocker + warning
+   *  fixes verbatim. Then re-validates. Cap is 5 server-side. */
+  const refineNow = useCallback(
+    async (callId?: string | null) => {
+      // Snapshot the current state (avoid stale closure capture).
+      let snapshot: WorkflowState | null = null;
+      setState((s) => {
+        snapshot = s;
+        return s;
+      });
+      const cur = snapshot as WorkflowState | null;
+      if (!cur || !cur.workflow || !cur.validation) return;
+      if (cur.refinementPasses >= 5) return; // server cap
+
+      const ctrl = new AbortController();
+      setState((s) => ({
+        ...s,
+        running: true,
+        error: null,
+        steps: { ...s.steps, refine: "running", validation: "running" },
+        lastFixedIssues: cur.validation!.issues,
+      }));
+
+      try {
+        const refined = await streamSseResult<N8nWorkflow>(
+          "/api/workflow-refine",
+          {
+            workflow: cur.workflow,
+            issues: cur.validation.issues,
+            call_id: callId,
+            pass_number: cur.refinementPasses + 1,
+          },
+          ctrl.signal
+        );
+        setState((s) => ({
+          ...s,
+          workflow: refined,
+          refinementPasses: s.refinementPasses + 1,
+          steps: { ...s.steps, refine: "done" },
+        }));
+        const validation = await postJson<ValidationResponse>(
+          "/api/validate-workflow",
+          { workflow: refined, call_id: callId },
+          ctrl.signal
+        );
+        setState((s) => ({
+          ...s,
+          validation,
+          running: false,
+          steps: { ...s.steps, validation: "done" },
+        }));
+      } catch (err) {
+        if ((err as any)?.name === "AbortError") return;
+        setState((s) => ({
+          ...s,
+          running: false,
+          error: (err as Error).message,
+          steps: {
+            ...s.steps,
+            refine: "error",
+            validation: s.validation ? "done" : "error",
+          },
+        }));
+      }
+    },
+    []
+  );
+
+  return { ...state, generate, refineNow, reset };
 }

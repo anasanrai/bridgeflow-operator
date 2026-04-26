@@ -63,6 +63,7 @@ export function WorkflowTab({ results, pipelineId }: Props) {
         refinementPasses={wf.refinementPasses}
         lastFixedIssues={wf.lastFixedIssues}
         onGenerate={() => wf.generate(results, pipelineId ?? null)}
+        onRefine={() => wf.refineNow(pipelineId ?? null)}
         onReset={wf.reset}
       />
 
@@ -101,6 +102,7 @@ function Header({
   refinementPasses,
   lastFixedIssues,
   onGenerate,
+  onRefine,
   onReset,
 }: {
   running: boolean;
@@ -109,6 +111,7 @@ function Header({
   refinementPasses: number;
   lastFixedIssues: ValidationIssue[];
   onGenerate: () => void;
+  onRefine: () => void;
   onReset: () => void;
 }) {
   const order: Array<{ key: keyof typeof steps; label: string }> = [
@@ -177,7 +180,7 @@ function Header({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {!allIdle && (
             <button
               onClick={onReset}
@@ -188,6 +191,36 @@ function Header({
               Reset
             </button>
           )}
+          {(() => {
+            // Manual self-heal — visible whenever validation is done and
+            // there's anything left to fix (blockers OR warnings). Hidden
+            // before validation runs and once we hit the 5-pass server cap.
+            if (!validation) return null;
+            const fixable = validation.issues.filter(
+              (i) => i.severity === "blocker" || i.severity === "warning"
+            ).length;
+            if (fixable === 0) return null;
+            const capped = refinementPasses >= 5;
+            return (
+              <button
+                onClick={onRefine}
+                disabled={running || capped}
+                title={
+                  capped
+                    ? "Refinement cap reached (5 passes)"
+                    : `Apply ${fixable} suggested fix${fixable === 1 ? "" : "es"} via Opus 4.7`
+                }
+                className="inline-flex items-center gap-2 text-xs font-semibold px-3.5 py-2 rounded-md border border-accent/45 bg-accent/[0.08] text-accent hover:bg-accent/15 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer shadow-glow-accent"
+              >
+                <IconSparkle className="w-3.5 h-3.5" />
+                {running
+                  ? "Refining…"
+                  : capped
+                  ? "Capped"
+                  : `Self-heal · ${fixable} fix${fixable === 1 ? "" : "es"}`}
+              </button>
+            );
+          })()}
           <button
             onClick={onGenerate}
             disabled={running}

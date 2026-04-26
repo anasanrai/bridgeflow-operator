@@ -819,11 +819,12 @@ async def workflow_draft(req: WorkflowDraftRequest) -> StreamingResponse:
 @app.post("/workflow-refine")
 async def workflow_refine(req: WorkflowRefineRequest):
     """V2 self-correcting loop. Streamed (SSE) like /workflow-draft to
-    survive Railway's edge proxy. Capped at 2 passes server-side via
-    pass_number; calls beyond pass 2 are rejected so we don't infinite-loop
-    on a stubborn workflow. When there are no issues, returns the workflow
-    unchanged as a one-shot SSE 'done' event."""
-    if req.pass_number > 2:
+    survive Railway's edge proxy. Cap at 5 passes server-side via
+    pass_number — generous because the auto-loop self-caps at 2 and any
+    additional passes are user-triggered (Refine again button). When
+    there are no issues, returns the workflow unchanged as a one-shot
+    SSE 'done' event."""
+    if req.pass_number > 5:
         raise HTTPException(429, "max_refinement_passes_exceeded")
 
     if not req.issues:
