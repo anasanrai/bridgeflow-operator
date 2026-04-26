@@ -48,6 +48,10 @@ from agents import (  # noqa: E402
 from agents import (  # noqa: E402
     build_consultant_context_block,
     build_consultant_system,
+    build_memory_block,
+    extract_prospect_identifier,
+    memory_summary_for_event,
+    with_memory_context,
 )
 from agents.base import extract_json, run_agent, stream_agent  # noqa: E402
 from db import supabase_client  # noqa: E402
@@ -138,29 +142,60 @@ async def pipeline_stream(transcript: str) -> AsyncIterator[str]:
     # V2: load the company profile once, inject into every agent's system prompt.
     company_profile = supabase_client.get_company_profile()
 
+    # V2 lead memory — regex-extract any prospect identifier from the
+    # raw transcript and look up prior pipeline_runs for the same person.
+    # When matches exist, prepend a PRIOR CONTEXT block to agents 1/2/3/5
+    # so they treat this as a follow-up call instead of first contact.
+    ident = extract_prospect_identifier(transcript)
+    prior_runs = supabase_client.get_prior_runs_for_prospect(
+        email=ident.get("email"),
+        company=None,            # we don't know company yet — rely on email match
+        exclude_call_id=call_id,
+        limit=5,
+    )
+    memory_block = build_memory_block(prior_runs)
+    if memory_block:
+        yield sse(
+            {
+                "type": "memory_loaded",
+                **memory_summary_for_event(prior_runs),
+                "matched_email": ident.get("email"),
+            }
+        )
+
+    def _wrap(base: str, *, with_memory: bool = True) -> str:
+        # Profile context first, then memory (so memory survives even if
+        # no profile is set). Agents see both blocks above their role
+        # instructions.
+        out = with_company_context(base, company_profile)
+        if with_memory and memory_block:
+            out = with_memory_context(out, memory_block)
+        return out
+
     outputs: dict[str, dict] = {}
 
     specs = [
         (
             "call_analyst",
-            with_company_context(CALL_ANALYST_SYSTEM, company_profile),
+            _wrap(CALL_ANALYST_SYSTEM),
             lambda: build_call_analyst_user(transcript),
         ),
         (
             "lead_qualifier",
-            with_company_context(LEAD_QUALIFIER_SYSTEM, company_profile),
+            _wrap(LEAD_QUALIFIER_SYSTEM),
             lambda: build_lead_qualifier_user(outputs["call_analyst"]),
         ),
         (
             "campaign_architect",
-            with_company_context(CAMPAIGN_ARCHITECT_SYSTEM, company_profile),
+            _wrap(CAMPAIGN_ARCHITECT_SYSTEM),
             lambda: build_campaign_architect_user(
                 outputs["call_analyst"], outputs["lead_qualifier"]
             ),
         ),
         (
             "action_executor",
-            with_company_context(ACTION_EXECUTOR_SYSTEM, company_profile),
+            # Action executor doesn't need memory — it just emits the manifest.
+            _wrap(ACTION_EXECUTOR_SYSTEM, with_memory=False),
             lambda: build_action_executor_user(
                 outputs["call_analyst"],
                 outputs["lead_qualifier"],
@@ -169,7 +204,7 @@ async def pipeline_stream(transcript: str) -> AsyncIterator[str]:
         ),
         (
             "reflection_agent",
-            with_company_context(REFLECTION_SYSTEM, company_profile),
+            _wrap(REFLECTION_SYSTEM),
             lambda: build_reflection_user(
                 outputs["call_analyst"],
                 outputs["lead_qualifier"],

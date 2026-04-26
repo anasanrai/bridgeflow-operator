@@ -41,8 +41,18 @@ export interface PipelineResults {
   reflection: any;
 }
 
+export interface MemorySummary {
+  prior_count: number;
+  last_call_at?: string | null;
+  last_call_relative?: string | null;
+  last_score?: string | null;
+  last_decision?: string | null;
+  matched_email?: string | null;
+}
+
 export type StreamEvent =
   | { type: "pipeline_start"; call_id?: string | null }
+  | ({ type: "memory_loaded" } & MemorySummary)
   | { type: "agent_start"; agent: AgentName; index: number }
   | { type: "agent_delta"; agent: AgentName; index: number; delta: string }
   | { type: "agent_complete"; agent: AgentName; index: number; output: any }

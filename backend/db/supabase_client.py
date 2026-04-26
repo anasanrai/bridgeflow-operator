@@ -276,6 +276,69 @@ def get_latest_pending_approval() -> dict | None:
         return None
 
 
+def get_prior_runs_for_prospect(
+    *,
+    email: str | None = None,
+    company: str | None = None,
+    exclude_call_id: str | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    """Find pipeline_runs from the same prospect, used for the lead-memory
+    feature. Strategy:
+      1. If email given → look it up in `leads`, collect call_ids.
+      2. Pull pipeline_runs for those call_ids (excluding the current run).
+      3. Fallback: if email yields nothing, match by exact company name on
+         pipeline_runs.company directly.
+    Returns at most `limit` rows ordered newest-first. Always safe to
+    call — returns [] on any failure."""
+    client = get_client()
+    if client is None:
+        return []
+    rows: list[dict] = []
+    try:
+        call_ids: list[str] = []
+        if email:
+            resp = (
+                client.table("leads")
+                .select("call_id")
+                .eq("email", email)
+                .execute()
+            )
+            for r in getattr(resp, "data", None) or []:
+                cid = r.get("call_id")
+                if cid and cid != exclude_call_id:
+                    call_ids.append(cid)
+
+        if call_ids:
+            q = (
+                client.table("pipeline_runs")
+                .select("*")
+                .in_("call_id", call_ids)
+                .order("created_at", desc=True)
+                .limit(limit)
+            )
+            if exclude_call_id:
+                q = q.neq("call_id", exclude_call_id)
+            rows = getattr(q.execute(), "data", None) or []
+
+        # Fallback by company name when no email match yielded anything.
+        if not rows and company:
+            q = (
+                client.table("pipeline_runs")
+                .select("*")
+                .eq("company", company)
+                .order("created_at", desc=True)
+                .limit(limit)
+            )
+            if exclude_call_id:
+                q = q.neq("call_id", exclude_call_id)
+            rows = getattr(q.execute(), "data", None) or []
+    except Exception as exc:
+        print(f"[supabase] get_prior_runs_for_prospect failed: {exc}")
+        return []
+    return rows
+
+
 def get_call_record(call_id: str) -> dict | None:
     client = get_client()
     if client is None or not call_id:

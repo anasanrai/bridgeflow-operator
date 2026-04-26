@@ -80,6 +80,7 @@ export default function PipelinePage() {
               agents={pipeline.agents}
               running={pipeline.running}
               onCancel={pipeline.reset}
+              memory={pipeline.memory}
             />
           </section>
 

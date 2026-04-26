@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { IconCheck, IconClock, IconSparkle, IconX } from "../lib/icons";
-import { AGENT_LABELS, AGENT_ORDER, AgentName, AgentState } from "../lib/types";
+import {
+  AGENT_LABELS,
+  AGENT_ORDER,
+  AgentName,
+  AgentState,
+  MemorySummary,
+} from "../lib/types";
 
 interface Props {
   agents: Record<AgentName, AgentState>;
@@ -10,9 +16,12 @@ interface Props {
   /** Interrupt the in-flight pipeline. Wired to useAgentStream.reset(),
    *  which aborts the SSE fetch and resets all agent state to idle. */
   onCancel?: () => void;
+  /** Lead memory summary — when present, the Call Analyst card shows a
+   *  "× N prior calls" amber chip instead of running cold. */
+  memory?: MemorySummary | null;
 }
 
-export function AgentStream({ agents, running, onCancel }: Props) {
+export function AgentStream({ agents, running, onCancel, memory }: Props) {
   const { done, total, activeIndex } = useMemo(() => {
     const total = AGENT_ORDER.length;
     const done = AGENT_ORDER.filter((n) => agents[n].status === "done").length;
@@ -91,7 +100,11 @@ export function AgentStream({ agents, running, onCancel }: Props) {
       <ol className="divide-y divide-border">
         {AGENT_ORDER.map((name, idx) => (
           <li key={name}>
-            <AgentCard index={idx + 1} agent={agents[name]} />
+            <AgentCard
+              index={idx + 1}
+              agent={agents[name]}
+              memory={name === "call_analyst" ? memory ?? null : null}
+            />
           </li>
         ))}
       </ol>
@@ -99,7 +112,15 @@ export function AgentStream({ agents, running, onCancel }: Props) {
   );
 }
 
-function AgentCard({ agent, index }: { agent: AgentState; index: number }) {
+function AgentCard({
+  agent,
+  index,
+  memory,
+}: {
+  agent: AgentState;
+  index: number;
+  memory?: MemorySummary | null;
+}) {
   const label = AGENT_LABELS[agent.name];
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -115,6 +136,7 @@ function AgentCard({ agent, index }: { agent: AgentState; index: number }) {
       : null;
 
   const showStream = agent.status !== "idle" || agent.raw;
+  const memoryActive = !!(memory && memory.prior_count > 0);
 
   return (
     <article className="px-5 py-4">
@@ -122,7 +144,10 @@ function AgentCard({ agent, index }: { agent: AgentState; index: number }) {
         <div className="flex items-center gap-3 min-w-0">
           <StageIndicator index={index} status={agent.status} />
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-ink truncate">{label.title}</div>
+            <div className="text-sm font-semibold text-ink truncate flex items-center gap-2">
+              {label.title}
+              {memoryActive && <MemoryChip memory={memory!} />}
+            </div>
             <div className="text-xs text-muted truncate">{label.subtitle}</div>
           </div>
         </div>
@@ -211,6 +236,34 @@ function Dot({ delay }: { delay: string }) {
 function SkeletonLine() {
   return (
     <span className="inline-block w-1/2 h-3 rounded bg-border/80 align-middle" />
+  );
+}
+
+function MemoryChip({ memory }: { memory: MemorySummary }) {
+  const lastScore = (memory.last_score ?? "").toUpperCase();
+  const tone = lastScore === "HOT"
+    ? "border-hot/45 text-hot bg-hot/10"
+    : lastScore === "WARM"
+    ? "border-warm/45 text-warm bg-warm/10"
+    : "border-amber-500/45 text-amber-200 bg-amber-500/10";
+  const ago = memory.last_call_relative ?? "earlier";
+  const callsLabel =
+    memory.prior_count === 1 ? "1 prior call" : `${memory.prior_count} prior calls`;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${tone} animate-fade-in-up`}
+      title={
+        memory.matched_email
+          ? `Matched on ${memory.matched_email} · last ${ago}${
+              lastScore ? ` · prior ${lastScore}` : ""
+            }`
+          : `${callsLabel} · ${ago}`
+      }
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-current animate-blink" />
+      memory · {callsLabel}
+      {lastScore && <span className="opacity-80">· {lastScore} {ago}</span>}
+    </span>
   );
 }
 

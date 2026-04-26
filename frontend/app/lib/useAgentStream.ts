@@ -5,6 +5,7 @@ import {
   AGENT_ORDER,
   AgentName,
   AgentState,
+  MemorySummary,
   PipelineResults,
   StreamEvent,
 } from "./types";
@@ -29,6 +30,7 @@ export interface PipelineState {
   agents: Record<AgentName, AgentState>;
   results: PipelineResults | null;
   error: string | null;
+  memory: MemorySummary | null;
 }
 
 export function useAgentStream() {
@@ -38,6 +40,7 @@ export function useAgentStream() {
     agents: makeIdleAgents(),
     results: null,
     error: null,
+    memory: null,
   });
 
   const abortRef = useRef<AbortController | null>(null);
@@ -51,6 +54,7 @@ export function useAgentStream() {
       agents: makeIdleAgents(),
       results: null,
       error: null,
+      memory: null,
     });
   }, []);
 
@@ -65,6 +69,7 @@ export function useAgentStream() {
       agents: makeIdleAgents(),
       results: null,
       error: null,
+      memory: null,
     });
 
     let response: Response;
@@ -104,6 +109,12 @@ export function useAgentStream() {
           case "pipeline_start":
             next.callId = evt.call_id ?? null;
             break;
+          case "memory_loaded": {
+            const { type: _t, ...rest } = evt;
+            void _t;
+            next.memory = rest;
+            break;
+          }
           case "agent_start": {
             const existing = prev.agents[evt.agent];
             next.agents[evt.agent] = {

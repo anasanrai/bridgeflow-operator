@@ -1,5 +1,11 @@
 from .base import run_agent, MODEL
 from .company_context import with_company_context, build_company_context_block
+from .lead_memory import (
+    build_memory_block,
+    extract_prospect_identifier,
+    memory_summary_for_event,
+    with_memory_context,
+)
 from .consultant import (
     build_system as build_consultant_system,
     build_context_block as build_consultant_context_block,
@@ -20,6 +26,10 @@ __all__ = [
     "MODEL",
     "with_company_context",
     "build_company_context_block",
+    "build_memory_block",
+    "extract_prospect_identifier",
+    "memory_summary_for_event",
+    "with_memory_context",
     "build_consultant_system",
     "build_consultant_context_block",
     "CALL_ANALYST_SYSTEM",
