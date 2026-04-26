@@ -18,6 +18,10 @@ from .groq_transcribe import (
     MAX_BYTES as GROQ_MAX_BYTES,
     TranscriptionError,
 )
+from .hubspot import (
+    sync_lead_to_hubspot,
+    hubspot_configured,
+)
 
 __all__ = [
     "notify_hot_lead",
@@ -34,4 +38,6 @@ __all__ = [
     "GROQ_ALLOWED_EXT",
     "GROQ_MAX_BYTES",
     "TranscriptionError",
+    "sync_lead_to_hubspot",
+    "hubspot_configured",
 ]

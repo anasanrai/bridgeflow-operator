@@ -8,6 +8,7 @@ type Config = {
   supabase: boolean;
   resend: boolean;
   telegram: boolean;
+  hubspot?: boolean;
 };
 
 const LABELS: Array<{ key: keyof Config; name: string; env: string }> = [
@@ -15,6 +16,7 @@ const LABELS: Array<{ key: keyof Config; name: string; env: string }> = [
   { key: "supabase", name: "Supabase", env: "SUPABASE_URL" },
   { key: "resend", name: "Resend", env: "RESEND_API_KEY" },
   { key: "telegram", name: "Telegram", env: "TELEGRAM_BOT_TOKEN" },
+  { key: "hubspot", name: "HubSpot", env: "HUBSPOT_TOKEN" },
 ];
 
 export function CredentialStatus() {

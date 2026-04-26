@@ -24,6 +24,8 @@ interface ConfigStatus {
   resend: boolean;
   telegram: boolean;
   groq: boolean;
+  hubspot?: boolean;
+  hubspot_portal_id?: string | null;
   telegram_approval_mode?: boolean;
 }
 
@@ -51,6 +53,7 @@ export default function CredentialsPage() {
           <AIModelsCard config={config} />
           <NotificationsCard config={config} />
           <EmailCard config={config} />
+          <CRMCard config={config} />
           <ComingSoon />
         </>
       )}
@@ -327,6 +330,101 @@ function EmailCard({ config }: { config: ConfigStatus | null }) {
         )}
       </div>
     </Section>
+  );
+}
+
+// ── V2 CRM (HubSpot — live) ─────────────────────────────────────────────
+
+function CRMCard({ config }: { config: ConfigStatus | null }) {
+  const ok = !!config?.hubspot;
+  const portalId = config?.hubspot_portal_id;
+  const region = "eu1"; // backend default; wire later if needed
+  const portalUrl =
+    ok && portalId
+      ? `https://app-${region}.hubspot.com/contacts/${portalId}`
+      : null;
+
+  return (
+    <Section title="CRM" icon={<IconUsers className="w-4 h-4" />}>
+      <div className="rounded-lg border border-border bg-bg/40 p-4">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-md bg-[#ff7a59]/15 border border-[#ff7a59]/40 text-[#ff9777] flex items-center justify-center">
+              <span className="text-[12px] font-bold leading-none">H</span>
+            </div>
+            <div>
+              <div className="text-[13px] font-semibold text-ink">HubSpot</div>
+              <div className="text-[11px] text-muted">
+                Contacts + Deals · auto-sync on HOT/WARM leads
+              </div>
+            </div>
+          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+              ok
+                ? "border-accent/40 text-accent bg-accent/10"
+                : "border-border text-faint bg-surface"
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                ok ? "bg-accent shadow-glow-accent" : "bg-faint"
+              }`}
+            />
+            {ok ? "live" : "not connected"}
+          </span>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-mono">
+          <Stat label="Contacts" value={ok ? "read + write" : "—"} live={ok} />
+          <Stat label="Deals" value={ok ? "create + assoc" : "—"} live={ok} />
+          <Stat
+            label="Portal"
+            value={portalId ? `id ${portalId}` : "—"}
+            live={!!portalId}
+          />
+        </div>
+
+        {portalUrl && (
+          <a
+            href={portalUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-md border border-accent/40 bg-accent/[0.07] text-accent hover:bg-accent/[0.12] transition-colors cursor-pointer"
+          >
+            Open contacts in HubSpot →
+          </a>
+        )}
+
+        <div className="mt-3 text-[11px] text-muted leading-relaxed">
+          Token lives in <code className="font-mono text-ink-muted">HUBSPOT_TOKEN</code>{" "}
+          (Railway env). Each pipeline run with score=HOT or WARM triggers a
+          contact upsert (search-by-email) + new deal + association. Synced
+          actions appear in the Action Manifest with click-through links.
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  live,
+}: {
+  label: string;
+  value: string;
+  live?: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-surface px-2 py-1.5">
+      <div className="text-[9px] font-mono uppercase tracking-wider text-faint">
+        {label}
+      </div>
+      <div className={`mt-0.5 ${live ? "text-ink-muted" : "text-faint"}`}>
+        {value}
+      </div>
+    </div>
   );
 }
 

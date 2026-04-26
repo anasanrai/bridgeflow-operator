@@ -4,9 +4,11 @@ import {
   IconArchive,
   IconCalendar,
   IconCheck,
+  IconChevron,
   IconHourglass,
   IconMail,
   IconSend,
+  IconTarget,
   IconTelegram,
 } from "../lib/icons";
 import { PipelineResults } from "../lib/types";
@@ -24,6 +26,7 @@ const TYPE_META: Record<
   log_crm: { Icon: IconSend, label: "Log to CRM" },
   book_call: { Icon: IconCalendar, label: "Book call" },
   archive: { Icon: IconArchive, label: "Archive" },
+  hubspot_sync: { Icon: IconTarget, label: "HubSpot sync" },
 };
 
 const PRIORITY_STYLES: Record<
@@ -162,10 +165,13 @@ export function ActionManifest({ results }: Props) {
                         {action.payload?.subject ? ` · ${action.payload.subject}` : ""}
                       </div>
                     )}
-                    {action.payload?.content && (
+                    {action.payload?.content && action.type !== "hubspot_sync" && (
                       <div className="text-xs text-ink-muted mt-1.5 line-clamp-3 whitespace-pre-wrap leading-relaxed">
                         {action.payload.content}
                       </div>
+                    )}
+                    {action.type === "hubspot_sync" && (
+                      <HubSpotLinks payload={action.payload ?? {}} />
                     )}
                   </div>
                 </div>
@@ -182,5 +188,46 @@ export function ActionManifest({ results }: Props) {
         </div>
       )}
     </section>
+  );
+}
+
+function HubSpotLinks({ payload }: { payload: Record<string, any> }) {
+  const contactUrl = payload.contact_url as string | undefined;
+  const dealUrl = payload.deal_url as string | undefined;
+  const action = payload.contact_action as string | undefined;
+  if (!contactUrl && !dealUrl) {
+    return (
+      <div className="text-[11px] text-hot mt-1.5 font-mono whitespace-pre-wrap">
+        {payload.content || "Sync failed."}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      {contactUrl && (
+        <a
+          href={contactUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="group inline-flex items-center gap-1.5 text-[11px] font-mono px-2 py-1 rounded-md border border-accent/40 bg-accent/[0.07] text-accent hover:bg-accent/[0.12] transition-colors cursor-pointer"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent" />
+          contact {action ? `(${action})` : ""}
+          <IconChevron className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
+        </a>
+      )}
+      {dealUrl && (
+        <a
+          href={dealUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="group inline-flex items-center gap-1.5 text-[11px] font-mono px-2 py-1 rounded-md border border-warm/45 bg-warm/[0.07] text-warm hover:bg-warm/[0.12] transition-colors cursor-pointer"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-warm shadow-glow-warm" />
+          deal
+          <IconChevron className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
+        </a>
+      )}
+    </div>
   );
 }

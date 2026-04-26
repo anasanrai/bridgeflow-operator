@@ -61,11 +61,13 @@ from integrations import (  # noqa: E402
     TranscriptionError,
     groq_configured,
     hold_immediate_emails_for_approval,
+    hubspot_configured,
     notify_hot_lead,
     send_approval_prompt,
     send_immediate_emails,
     send_single_email,
     send_telegram_text,
+    sync_lead_to_hubspot,
     telegram_answer_callback,
     telegram_clear_keyboard,
     telegram_configured,
@@ -311,6 +313,55 @@ async def pipeline_stream(transcript: str) -> AsyncIterator[str]:
             approval_state="pending" if held_emails_for_approval else "none",
         )
 
+        # V2 HubSpot sync — fires for HOT/WARM leads only. Best-effort:
+        # never breaks the pipeline. The result becomes a synthetic action
+        # appended to the manifest so the UI renders it next to email/etc.
+        score_val = (outputs.get("lead_qualifier") or {}).get("score") or ""
+        score_lower = score_val.lower()
+        if hubspot_configured() and score_lower in {"hot", "warm"}:
+            crm_note = (
+                outputs.get("reflection_agent") or {}
+            ).get("rep_briefing") or ""
+            hs = await sync_lead_to_hubspot(
+                outputs["call_analyst"].get("prospect") or {},
+                outputs["lead_qualifier"],
+                crm_note,
+            )
+            # Append as a synthetic action so it shows in ActionManifest.
+            actions_list = (outputs["action_executor"].get("actions") or [])
+            seq = (max((a.get("sequence") or 0) for a in actions_list) + 1) if actions_list else 1
+            synthetic = {
+                "sequence": seq,
+                "type": "hubspot_sync",
+                "priority": "immediate",
+                "status": "sent" if hs.get("synced") else "failed",
+                "payload": {
+                    "to": "hubspot",
+                    "subject": (
+                        f"Synced contact + deal · {hs.get('contact_action', 'created')}"
+                        if hs.get("synced") else "HubSpot sync failed"
+                    ),
+                    "content": (
+                        f"Contact: {hs.get('contact_url') or '—'}\n"
+                        f"Deal: {hs.get('deal_url') or '—'}"
+                        if hs.get("synced")
+                        else f"Error: {hs.get('error') or hs.get('skipped_reason') or 'unknown'}"
+                    ),
+                    "contact_id": hs.get("contact_id"),
+                    "deal_id": hs.get("deal_id"),
+                    "contact_url": hs.get("contact_url"),
+                    "deal_url": hs.get("deal_url"),
+                    "contact_action": hs.get("contact_action"),
+                },
+                "execution": hs,
+            }
+            actions_list.append(synthetic)
+            outputs["action_executor"]["actions"] = actions_list
+            # Persist to actions table.
+            supabase_client.insert_actions(call_id, {"actions": [synthetic]})
+            # Surface to the live UI via a dedicated SSE event too.
+            yield sse({"type": "hubspot_sync", "result": hs})
+
         # If we held emails earlier, send the approval prompt to Telegram now
         # (after Agent 5) and persist a pending_approvals row per held email.
         # Order: insert row first so we can stamp the inline-keyboard
@@ -390,6 +441,8 @@ async def config() -> dict:
             os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID")
         ),
         "groq": groq_configured(),
+        "hubspot": hubspot_configured(),
+        "hubspot_portal_id": (os.environ.get("HUBSPOT_PORTAL_ID") or "").strip() or None,
         "telegram_approval_mode": telegram_configured(),
     }
 
