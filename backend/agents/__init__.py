@@ -10,6 +10,7 @@ from .consultant import (
     build_system as build_consultant_system,
     build_context_block as build_consultant_context_block,
 )
+from .jarvis import build_system as build_jarvis_system
 from .call_analyst import SYSTEM as CALL_ANALYST_SYSTEM, build_user as build_call_analyst_user
 from .lead_qualifier import SYSTEM as LEAD_QUALIFIER_SYSTEM, build_user as build_lead_qualifier_user
 from .campaign_architect import SYSTEM as CAMPAIGN_ARCHITECT_SYSTEM, build_user as build_campaign_architect_user
@@ -32,6 +33,7 @@ __all__ = [
     "with_memory_context",
     "build_consultant_system",
     "build_consultant_context_block",
+    "build_jarvis_system",
     "CALL_ANALYST_SYSTEM",
     "build_call_analyst_user",
     "LEAD_QUALIFIER_SYSTEM",

@@ -1,5 +1,6 @@
 "use client";
 
+import { JarvisOverlay } from "./JarvisOverlay";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 
@@ -15,6 +16,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
+      <JarvisOverlay />
     </div>
   );
 }

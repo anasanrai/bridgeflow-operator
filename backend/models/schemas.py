@@ -91,6 +91,18 @@ class ConsultantRequest(BaseModel):
     conversation_history: list[ConsultantMessage] = Field(default_factory=list)
 
 
+# ── V2 Jarvis (operator assistant) ──────────────────────────────────────
+
+
+class JarvisRequest(BaseModel):
+    """Open-ended Jarvis turn. message can be empty when the client asks
+    Jarvis to greet (kind='greeting')."""
+    message: str = ""
+    kind: str = "user"  # "user" | "greeting"
+    current_page: str | None = None
+    conversation_history: list[ConsultantMessage] = Field(default_factory=list)
+
+
 class AgentEvent(BaseModel):
     """Server-sent event payload for the streaming pipeline."""
     type: str  # "agent_start" | "agent_delta" | "agent_complete" | "pipeline_complete" | "error"

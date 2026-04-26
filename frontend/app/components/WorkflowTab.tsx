@@ -54,6 +54,38 @@ interface Props {
 export function WorkflowTab({ results, pipelineId }: Props) {
   const wf = useWorkflowGenerator();
 
+  // Jarvis voice/text shortcuts: react to {action:"click",target:"…"}
+  // directives the operator gave Jarvis. Idempotent — only fires when
+  // the corresponding state is reachable (e.g. self-heal needs a workflow).
+  useEffect(() => {
+    const onClick = (e: Event) => {
+      const target = (e as CustomEvent).detail?.target;
+      if (target === "self_heal" && wf.workflow && !wf.running) {
+        wf.refineNow(pipelineId ?? null);
+      } else if (target === "regenerate_workflow" && !wf.running) {
+        wf.generate(results, pipelineId ?? null);
+      } else if (target === "download_json" && wf.workflow) {
+        const json = JSON.stringify(wf.workflow, null, 2);
+        const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const slug = (wf.workflow.name || "workflow")
+          .replace(/[^a-z0-9-]+/gi, "-")
+          .toLowerCase() || "workflow";
+        a.href = url;
+        a.download = `bridgeflow-${slug}-${stamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+    };
+    window.addEventListener("jarvis:click", onClick);
+    return () => window.removeEventListener("jarvis:click", onClick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wf.workflow, wf.running, pipelineId]);
+
   return (
     <div className="space-y-5">
       <Header

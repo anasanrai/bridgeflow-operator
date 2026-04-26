@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IconPlay, IconRefresh, IconSparkle, IconUpload } from "../lib/icons";
 
 interface Props {
@@ -39,6 +39,19 @@ export function TranscriptUpload({ running, onRun, onReset }: Props) {
     setValue(DEMO_TRANSCRIPT);
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
+
+  // Jarvis: "run the demo" → load + run in one shot.
+  useEffect(() => {
+    const onRunDemo = () => {
+      if (running) return;
+      setValue(DEMO_TRANSCRIPT);
+      // Defer one tick so the input shows the loaded transcript before we
+      // immediately fire onRun with the full string (state update vs. event).
+      setTimeout(() => onRun(DEMO_TRANSCRIPT), 80);
+    };
+    window.addEventListener("jarvis:run_demo", onRunDemo);
+    return () => window.removeEventListener("jarvis:run_demo", onRunDemo);
+  }, [running, onRun]);
 
   const handleFile = async (file: File) => {
     const text = await file.text();

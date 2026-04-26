@@ -48,6 +48,7 @@ from agents import (  # noqa: E402
 from agents import (  # noqa: E402
     build_consultant_context_block,
     build_consultant_system,
+    build_jarvis_system,
     build_memory_block,
     extract_prospect_identifier,
     memory_summary_for_event,
@@ -79,6 +80,7 @@ from models.schemas import (  # noqa: E402
     ConsultantRequest,
     CredentialsRequest,
     EditApprovalRequest,
+    JarvisRequest,
     PlaybookRequest,
     TestEmailRequest,
     ValidateWorkflowRequest,
@@ -547,6 +549,134 @@ async def consultant(req: ConsultantRequest) -> StreamingResponse:
             yield f"data: {json.dumps({'type': 'error', 'message': f'{type(exc).__name__}: {exc}'})}\n\n"
             return
         yield f"data: {json.dumps({'type': 'done', 'full': ''.join(buffer)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+# ── V2: Jarvis (operator-side voice/text assistant) ───────────────────
+
+
+def _jarvis_live_context() -> dict:
+    """Snapshot the live operator state for Jarvis to ground its answers in.
+    Pulled fresh on every turn so it stays current. Cheap — small reads."""
+    cfg = {
+        "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY")),
+        "supabase": supabase_client.get_client() is not None,
+        "resend": bool(os.environ.get("RESEND_API_KEY")),
+        "telegram": telegram_configured(),
+        "groq": groq_configured(),
+        "hubspot": hubspot_configured(),
+    }
+    integrations_live = sum(1 for v in cfg.values() if v)
+
+    runs = supabase_client.list_pipeline_runs(limit=10) or []
+    pending = supabase_client.list_pending_approvals(status="pending", limit=20) or []
+
+    # Compact lead snapshot — counts, not the full rows.
+    lead_counts = {"hot": 0, "warm": 0, "cold": 0, "total": 0}
+    try:
+        client = supabase_client.get_client()
+        if client is not None:
+            r = (
+                client.table("leads")
+                .select("score,status")
+                .or_("status.is.null,status.neq.archived")
+                .execute()
+            )
+            rows = getattr(r, "data", None) or []
+            lead_counts["total"] = len(rows)
+            for row in rows:
+                s = (row.get("score") or "").lower()
+                if s in lead_counts:
+                    lead_counts[s] += 1
+    except Exception:
+        pass
+
+    return {
+        "integrations": cfg,
+        "integrations_live_count": f"{integrations_live}/6",
+        "recent_runs": [
+            {
+                "prospect": r.get("prospect_name"),
+                "company": r.get("company"),
+                "score": r.get("score"),
+                "decision": r.get("decision"),
+                "approval_state": r.get("approval_state"),
+                "created_at": r.get("created_at"),
+            }
+            for r in runs[:5]
+        ],
+        "pending_approvals_count": len(pending),
+        "pending_approval_subjects": [
+            (p.get("email_payload") or {}).get("subject") for p in pending[:3]
+        ],
+        "leads": lead_counts,
+    }
+
+
+@app.post("/jarvis")
+async def jarvis(req: JarvisRequest) -> StreamingResponse:
+    """Open-ended operator assistant. Streams a single Opus 4.7 turn with
+    live system context. Optional history for multi-turn."""
+    profile = supabase_client.get_company_profile()
+    company_name = (profile or {}).get("company_name")
+    context = _jarvis_live_context()
+    system = build_jarvis_system(
+        context=context,
+        current_page=req.current_page,
+        company_name=company_name,
+    )
+
+    # Compose messages: replay history + the new turn (or a synthetic
+    # "say hello" bootstrap when kind=greeting).
+    messages: list[dict] = [
+        {"role": m.role, "content": m.content} for m in req.conversation_history
+    ]
+    if req.kind == "greeting":
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "(System bootstrap — the operator just opened the dashboard. "
+                    "Greet them briefly using their company name if known, then "
+                    "name 1-2 specific things from the live context they should "
+                    "know about right now — e.g. pending approvals, recent HOT "
+                    "leads, integration warnings. End with a short open question. "
+                    "Keep it under 3 sentences.)"
+                ),
+            }
+        )
+    else:
+        messages.append({"role": "user", "content": req.message or "(empty)"})
+
+    async def event_stream():
+        yield f"data: {json.dumps({'type': 'start'})}\n\n"
+        buf: list[str] = []
+        try:
+            from agents.base import MAX_TOKENS, MODEL, _get_client  # type: ignore
+
+            client = _get_client()  # type: ignore
+            async with client.messages.stream(
+                model=MODEL,
+                max_tokens=min(MAX_TOKENS, 800),  # Jarvis stays tight
+                system=system,
+                messages=messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    buf.append(text)
+                    yield f"data: {json.dumps({'type': 'delta', 'delta': text})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'{type(exc).__name__}: {exc}'})}\n\n"
+            return
+        yield f"data: {json.dumps({'type': 'done', 'full': ''.join(buf)})}\n\n"
 
     return StreamingResponse(
         event_stream(),
