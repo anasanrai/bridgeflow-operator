@@ -1,255 +1,314 @@
 # BridgeFlow Operator
 
-> **An autonomous 5-agent sales floor — every agent is Claude Opus 4.7.**
-> Drop in a sales call transcript, watch five specialist agents reason through it in real time, and end up with a qualified lead, a personalised follow-up campaign, an action manifest that *actually* fires Telegram + Resend, and a self-audited rep briefing — in roughly the time it takes to refill your coffee.
+**Autonomous 5-agent sales pipeline. Built with Claude Code + Claude Opus 4.7.**
 
-Built for the **Built with Opus 4.7** hackathon.
+Drop a sales call recording. Five Opus 4.7 agents qualify the lead, draft a
+personalized follow-up campaign, generate an importable n8n workflow, fire
+real Telegram + Resend + HubSpot actions, and self-review — in 90 seconds.
 
----
-
-## What it does
-
-A single sales call goes in. Five specialist agents — each running on `claude-opus-4-7` — pass structured JSON down a pipeline. The output isn't a chat reply; it's *operations*:
-
-- a row in your CRM
-- a Telegram alert to the rep on every HOT lead
-- real follow-up emails sent by Resend within seconds of the call ending
-- a self-graded QA report that calls itself out when something is sketchy
-
-Everything streams over Server-Sent Events, so the dashboard shows each agent thinking live — not a spinner waiting for a single 30-second response.
+- 🌐 **Live:** [operator.bridgeflow.agency](https://operator.bridgeflow.agency)
+- 📦 **Repo:** [github.com/anasanrai/bridgeflow-operator](https://github.com/anasanrai/bridgeflow-operator)
+- 🏆 **Hackathon:** Built with Opus 4.7 · [cerebralvalley.ai](https://cerebralvalley.ai/e/built-with-4-7-hackathon)
+- 🎬 **Demo:** see `Built_with_Opus_4.7/Screenshots/` (hero, dashboard, telegram, 5-agent run)
 
 ---
 
-## The 5-agent architecture
+## The Pipeline
 
 ```
-                ┌─────────────────────────────────────┐
-                │  Sales call transcript (raw text)   │
-                └─────────────────┬───────────────────┘
-                                  │
-                                  ▼
-        ┌────────────────────────────────────────────────┐
-        │ Agent 1 · Call Analyst      (Opus 4.7, stream) │
-        │   intent · budget · timeline · objections      │
-        │   prospect contact info · sentiment            │
-        └────────────────────┬───────────────────────────┘
-                             │   structured JSON
-                             ▼
-        ┌────────────────────────────────────────────────┐
-        │ Agent 2 · Lead Qualifier    (Opus 4.7, stream) │
-        │   HOT / WARM / COLD + confidence + reasoning   │
-        │   decisive next action                         │
-        └────────────────────┬───────────────────────────┘
-                             │
-                             ▼
-        ┌────────────────────────────────────────────────┐
-        │ Agent 3 · Campaign Architect(Opus 4.7, stream) │
-        │   3-touch personalised email sequence          │
-        │   CRM note · talking points                    │
-        └────────────────────┬───────────────────────────┘
-                             │
-                             ▼
-        ┌────────────────────────────────────────────────┐
-        │ Agent 4 · Action Executor   (Opus 4.7, stream) │
-        │   action manifest:                             │
-        │     send_email · send_telegram                 │
-        │     log_crm · book_meeting · archive           │
-        └─────────┬────────────────────────────┬─────────┘
-                  │                            │
-        ╔═════════▼═════════╗        ╔═════════▼═════════╗
-        ║ Resend HTTP API   ║        ║ Telegram Bot API  ║
-        ║ (real follow-up   ║        ║ (HOT-lead alert   ║
-        ║  emails fire)     ║        ║  to the rep)      ║
-        ╚═════════╤═════════╝        ╚═════════╤═════════╝
-                  │  real outcomes (sent / failed)        │
-                  └────────────────┬─────────────────────┘
-                                   ▼
-        ┌────────────────────────────────────────────────┐
-        │ Agent 5 · Reflection        (Opus 4.7, stream) │
-        │   QA pass over agents 1-4 + real send results  │
-        │   flags · missed opportunities                 │
-        │   plain-English rep briefing                   │
-        └────────────────────┬───────────────────────────┘
-                             │
-                             ▼
-        ┌────────────────────────────────────────────────┐
-        │ Supabase · calls · analyses · leads · actions  │
-        │ Dashboard · live SSE stream · /leads board     │
-        └────────────────────────────────────────────────┘
+INPUT: Sales call recording (MP3/WAV/M4A) or raw transcript
+         │
+         ▼
+[GROQ WHISPER] whisper-large-v3-turbo → raw transcript (free, 216× real-time)
+         │
+         ▼
+[AGENT 01 ◆ CALL ANALYST]            claude-opus-4-7  ·  #00D4AA
+  Extracts: intent · budget · timeline · objections · sentiment
+            BANT signals · key quotes · follow-up hooks · red flags
+         │
+         ▼
+[AGENT 02 ◈ LEAD QUALIFIER]          claude-opus-4-7  ·  #22c55e
+  Scores:  HOT / WARM / COLD with confidence %
+  Decides: book_call_immediately / send_nurture_sequence /
+           send_single_followup / disqualify
+         │
+         ▼
+[AGENT 03 ◉ CAMPAIGN ARCHITECT]      claude-opus-4-7  ·  #a78bfa
+  Writes:  3-touch personalized email sequence
+  Drafts:  CRM note in your agent's voice
+  Uses:    Company Identity vault for tone, pricing, objections
+         │
+         ▼
+[AGENT 04 ◍ ACTION EXECUTOR]         claude-opus-4-7  ·  #f59e0b
+  Builds:  action manifest (send_email · send_telegram · book_call · log_crm)
+  Holds:   emails for Telegram APPROVE / EDIT / SKIP gating
+  Syncs:   HubSpot contact + deal (search-by-email upsert)
+         │
+         ▼
+[AGENT 05 ◎ REFLECTION]              claude-opus-4-7  ·  #3b82f6
+  Reviews: every prior agent output, flags placeholders + contradictions
+  Writes:  plain-English rep briefing
+  Scores:  pipeline confidence 0-100
+         │
+         ▼
+OUTPUT:  Qualified lead + emails + CRM note + n8n workflow JSON +
+         Telegram approval prompt + HubSpot deal + Supabase persistence
 ```
 
-Each arrow is a JSON contract — Agent N's parsed output becomes Agent N+1's user message. After Agent 4, the integrations fire **before** Agent 5 runs, so the reflection grades *what actually happened*, not what was planned.
+---
+
+## Why Opus 4.7
+
+Every agent runs `claude-opus-4-7`. We tested Sonnet 4.6 — it hallucinated
+prospect emails and dropped the JSON contract between agents under load.
+Opus 4.7 holds structured output reliably across all five agents in sequence.
+
+**One model. Five personas. Zero fine-tuning.**
+
+The Reflection agent specifically depends on Opus's ability to read its own
+upstream agents' outputs and catch failures — placeholder `[link]` text,
+contradictory decisions, missing context. Sonnet missed those almost every
+run; Opus catches them and triggers the self-correcting loop in the
+Workflow Generator.
 
 ---
 
-## Tech stack
+## Features
 
-| Layer       | Choice                                         | Why                                              |
-| ----------- | ---------------------------------------------- | ------------------------------------------------ |
-| Model       | `claude-opus-4-7` via `AsyncAnthropic.stream`  | Best reasoning, native streaming, JSON-reliable  |
-| Backend     | FastAPI + `sse-starlette`                      | One async process, true SSE, low overhead        |
-| Frontend    | Next.js 14 App Router + TypeScript + Tailwind  | Live agent panels, lead board, PDF report export |
-| DB          | Supabase (Postgres + REST)                     | `calls` · `analyses` · `leads` · `actions`       |
-| Email       | Resend HTTP API                                | One curl-style call, message ids back in seconds |
-| Alerts      | Telegram Bot API                               | Reps get a buzz the moment a HOT lead lands      |
-| Validation  | Pydantic v2 schemas                            | Strict request bodies, typed events              |
+### Live now (V1 + V2)
 
-Dependencies are deliberately minimal — see `backend/requirements.txt` (8 packages) and `frontend/package.json`.
+- ✅ Transcript paste **or** audio file upload (MP3 / WAV / M4A)
+- ✅ Groq Whisper transcription — `whisper-large-v3-turbo`, free, 216× real-time
+- ✅ 5 Opus 4.7 agents with live SSE streaming
+- ✅ HOT / WARM / COLD scoring with confidence %
+- ✅ **BANT panel** — Budget / Authority / Need / Timeline derived from call analysis
+- ✅ 3-touch personalized email sequence
+- ✅ CRM note in your agent's voice
+- ✅ Telegram APPROVE / EDIT / SKIP — human-in-the-loop before anything sends
+- ✅ Resend email delivery (`hello@bridgeflow.agency`)
+- ✅ HubSpot contact + deal creation (search-by-email upsert, no duplicates)
+- ✅ Supabase persistence — `calls`, `analyses`, `leads`, `actions`, `pipeline_runs`
+- ✅ Pipeline run history with full transcript preview
+- ✅ Leads CRM table (filter, edit, archive, hard delete)
+- ✅ Company Identity vault — agents speak as **your** company, your tone, your pricing
+- ✅ Jarvis AI consultant — ask about results, Claude Opus 4.7 rewrites emails live
+- ✅ **Lead memory** — prior call history injected into pipeline on repeat prospects
+- ✅ **n8n workflow generator** — playbook + JSON + credential checklist + validation + self-correcting loop
+- ✅ Workflow drafts persisted to Supabase
+- ✅ Voice assistant overlay — ElevenLabs streaming TTS, wake-word, barge-in
+- 🔶 Zapier / Make export (coming)
+- 🔶 Slack approval channel (coming)
+- 🔶 Model selector per agent (coming)
+
+### Coming soon (V3) — Call Center
+
+- VAPI / Twilio webhook → auto-pipeline on call end
+- Inbound + outbound voice agents
+- Real-time agent whisper to the rep mid-conversation
+- CRM connectors live: HubSpot · Follow Up Boss · Salesforce
+- Slack approvals as a peer to Telegram
+
+### 6 months out (V4) — Agency
+
+- Per-department autonomous agents (Sales, Support, Legal, Finance)
+- MCP-secured credential vault — no plaintext envs
+- Cross-agent handoffs (Sales → Onboarding → CSM)
+- Weekly P&L report generated by the agency itself
+- 5/95 human-to-agent ratio
+
+### $1M ARR target (V5) — Platform
+
+- Multi-tenant workspaces with strict data isolation
+- White-label deployment for agencies + consultancies
+- Usage-based billing (calls processed × tier)
+- Department agents with full MCP tooling per tenant
+- Public marketplace for agent personas + workflow templates
 
 ---
 
-## Run it
+## Tech Stack
 
-### Prereqs
-- Python 3.11+, Node 18+
-- An Anthropic API key with Opus 4.7 access
-- *(optional)* Resend API key, Telegram bot token, Supabase project
+| Layer | Technology |
+| --- | --- |
+| **Frontend** | Next.js 14 App Router · TypeScript · Tailwind CSS |
+| **Backend** | Python 3.11 · FastAPI · async Anthropic SDK · SSE streaming |
+| **AI** | Claude Opus 4.7 (`claude-opus-4-7`) — all 5 agents + consultant + workflow generator |
+| **Vision** | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) — Jarvis screen-sense |
+| **Transcription** | Groq Whisper (`whisper-large-v3-turbo`) — free tier |
+| **Database** | Supabase (Postgres + REST) |
+| **Email** | Resend (`hello@bridgeflow.agency`) |
+| **Notifications** | Telegram Bot API (inline keyboard approvals + webhook) |
+| **CRM** | HubSpot Private App API (EU portal) |
+| **TTS** | ElevenLabs Flash v2.5 (sentence-boundary streaming) |
+| **Frontend deploy** | Vercel |
+| **Backend deploy** | Railway |
+| **Domain** | `operator.bridgeflow.agency` |
 
-### 1. Backend
+---
+
+## Setup
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 18+
+- Accounts: Anthropic, Supabase, Resend, Telegram, Groq (HubSpot + ElevenLabs optional)
+
+### 1. Clone
+
+```bash
+git clone https://github.com/anasanrai/bridgeflow-operator
+cd bridgeflow-operator
+```
+
+### 2. Backend
 
 ```bash
 cd backend
-python3 -m venv venv && source venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-
-cp ../.env.example ../.env
-# fill in ANTHROPIC_API_KEY (required) and the optional integrations
-
+cp .env.example .env
+# Fill in your API keys in .env
 uvicorn main:app --reload --port 8000
 ```
 
-```bash
-curl http://localhost:8000/health
-# { "status": "ok", "model": "claude-opus-4-7", ... }
+### 3. Supabase migrations
+
+Open the Supabase SQL Editor and run, in order:
+
+```
+supabase/migrations/0001_init.sql
+supabase/migrations/0002_disable_rls_for_demo.sql
+supabase/migrations/0003_v2_tables.sql
+supabase/migrations/0004_v2_qa_pass.sql
 ```
 
-### 2. CLI smoke test (no frontend needed)
-
-```bash
-cd backend
-python run_pipeline.py            # streams all 5 agents on demo_transcript.txt
-python test_hot_lead_send.py you@example.com   # also fires real Resend + Telegram
-```
-
-### 3. Frontend
+### 4. Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev      # http://localhost:3000
+cp .env.example .env.local
+# Set NEXT_PUBLIC_API_URL=http://localhost:8000
+npm run dev
 ```
 
-Open the dashboard → **Load demo** → **Run 5-agent pipeline**. Five panels stream simultaneously, the lead board fills in, and the PDF report is one click.
-
-### 4. Supabase (optional)
-
-```bash
-psql "$SUPABASE_DB_URL" < supabase/migrations/0001_init.sql
-```
-
-Tables: `calls`, `analyses`, `leads`, `actions`. If unconfigured, the pipeline still runs — Supabase calls are no-ops and the UI falls back to seeded demo leads.
+Open `http://localhost:3000`.
 
 ---
 
-## API
+## Environment Variables
 
-`POST /analyze` — body `{ "transcript": "Agent: ...\nProspect: ..." }`, returns `text/event-stream`.
+```env
+# Required
+ANTHROPIC_API_KEY=sk-ant-...
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_KEY=eyJ...
 
-| Event                  | Payload                                                       |
-| ---------------------- | ------------------------------------------------------------- |
-| `pipeline_start`       | `{ call_id }`                                                 |
-| `agent_start`          | `{ agent, index }`                                            |
-| `agent_delta`          | `{ agent, index, delta }`  ← live thinking                    |
-| `agent_complete`       | `{ agent, index, output }`  ← parsed JSON                     |
-| `integrations_start`   | `{}`  (after Agent 4)                                         |
-| `integrations_complete`| `{ telegram, emails, actions }`                               |
-| `pipeline_complete`    | `{ call_id, results }`                                        |
-| `error`                | `{ agent?, message }`                                         |
-
-`GET /health` · `GET /config` (which integrations are live) · `GET /leads?limit=N`
-
----
-
-## Built with Opus 4.7
-
-Opus 4.7 isn't a feature of this project — it *is* the project. Every reasoning step in the pipeline, top to bottom, is Opus 4.7. There is no fallback model, no rules engine behind the curtain, no regex doing the actual work.
-
-**One model, five specialist personas.** Each agent ships its own `SYSTEM` prompt under `backend/agents/<agent>.py`. The Call Analyst is told to be a forensic listener; the Lead Qualifier is told to be brutally decisive; the Campaign Architect is told to write like a human SDR who actually listened to the call; the Action Executor is told to output a strict action-manifest schema; the Reflection agent is told to grade itself honestly, including flagging when earlier agents fabricated data. Same model, five different jobs, no fine-tuning required.
-
-**Live streaming, not turn-taking.** Each agent runs through `AsyncAnthropic.messages.stream`, and we ship every text delta straight to the browser as an `agent_delta` SSE event. The UI shows five panels lighting up in sequence with the model's actual token-by-token reasoning — not a "thinking…" spinner. See `backend/agents/base.py:31`.
-
-**Structured JSON without tool calls.** Every agent emits a strict JSON object. We stream the raw text, then parse once it's complete with a brace-matching extractor (`extract_json` in `backend/agents/base.py:56`) that tolerates stray prose or markdown fences. Opus 4.7 is reliable enough that we don't need the constraint of native tool-use to get clean structured output — the schemas live in the system prompts and the model honours them.
-
-**Reflection over real outcomes.** After Agent 4 produces its action manifest, we *actually fire* Resend and Telegram, mutate the action statuses with the real send results (message ids, error strings), and *then* invoke Agent 5. So the QA agent grades what actually happened — and in our hackathon test run it correctly flagged that the prospect's email had been overridden, even though no agent told it. That's Opus 4.7 catching a discrepancy across agent outputs by reasoning about them, not by being prompted to look.
-
-**Why Opus 4.7 specifically.** Sonnet hallucinated email addresses in early tests; smaller models lost the JSON contract on long transcripts. Opus 4.7 holds the schema across all five agents, generates personalised copy that references specific moments from the transcript (the lost Plano deal, the $5k approval ceiling, the Follow Up Boss complaint), and is honest enough during reflection to flag its *own* assumptions. The whole product depends on that combination.
-
-```python
-# backend/agents/base.py
-MODEL = "claude-opus-4-7"
-
-async def stream_agent(system: str, user: str) -> AsyncIterator[str]:
-    client = _get_client()
-    async with client.messages.stream(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    ) as stream:
-        async for text in stream.text_stream:
-            yield text
-```
-
-That's the entire model layer. Everything else in the repo is plumbing around this 14-line function.
-
----
-
-## Layout
-
-```
-bridgeflow-operator/
-├── backend/
-│   ├── main.py                FastAPI app + SSE pipeline
-│   ├── agents/
-│   │   ├── base.py            Opus 4.7 streaming runtime
-│   │   ├── call_analyst.py        Agent 1
-│   │   ├── lead_qualifier.py      Agent 2
-│   │   ├── campaign_architect.py  Agent 3
-│   │   ├── action_executor.py     Agent 4
-│   │   └── reflection_agent.py    Agent 5
-│   ├── integrations/
-│   │   ├── resend.py          real follow-up email sends
-│   │   └── telegram.py        HOT-lead rep alerts
-│   ├── db/supabase_client.py
-│   ├── models/schemas.py      Pydantic request + event types
-│   ├── run_pipeline.py        CLI smoke test
-│   ├── test_hot_lead_send.py  end-to-end test with real sends
-│   └── requirements.txt
-├── frontend/
-│   └── app/
-│       ├── page.tsx                     home / pipeline runner
-│       ├── leads/page.tsx               live lead board
-│       ├── api/analyze/route.ts         proxy → backend SSE
-│       ├── lib/useAgentStream.ts        SSE parser + state machine
-│       └── components/                  AgentStream · LeadReport · ActionManifest · Sparkline · ScoreBadge · …
-├── supabase/migrations/0001_init.sql    calls · analyses · leads · actions
-├── demo_transcript.txt                  Frisco Realty / Jake & David
-└── .env.example
+# Integrations (each unlocks a feature in the UI)
+GROQ_API_KEY=gsk_...               # Audio transcription
+RESEND_API_KEY=re_...               # Email delivery
+RESEND_FROM=hello@yourdomain.com
+TELEGRAM_BOT_TOKEN=123:ABC-...      # Approval notifications + inline keyboard
+TELEGRAM_CHAT_ID=6650...            # Your chat ID
+HUBSPOT_TOKEN=pat-eu1-...           # CRM contact + deal sync
+HUBSPOT_PORTAL_ID=12345678          # For deep-link "Open in HubSpot"
+HUBSPOT_REGION=eu1                  # eu1 / na1
+ELEVENLABS_API_KEY=...              # Optional — Jarvis voice assistant
+ELEVENLABS_VOICE_ID=onwK4e9ZLuTAKqWW03F9
+ELEVENLABS_MODEL_ID=eleven_flash_v2_5
 ```
 
 ---
 
-## Demo
+## SSE Event Schema
 
-`demo_transcript.txt` is a real-feeling sales call: a Texas realtor losing $15-20k/quarter to slow follow-up. Running it through BridgeFlow Operator produces:
+`POST /analyze` streams Server-Sent Events:
 
-- **Score:** HOT (≈85% confidence)
-- **Telegram alert** to the rep within seconds, with the exact blocker called out (sub-$5k pilot ceiling)
-- **Resend email** out to the prospect with personalised copy referencing the Plano deal he mentioned
-- **Reflection** that flags any assumed email addresses and queues the right human-review items before Thursday's working session
+```
+event: pipeline_start
+data: {"call_id": "uuid", "timestamp": "..."}
 
-End-to-end, including five Opus 4.7 streams + two real network sends, in well under a minute.
+event: agent_start
+data: {"agent": "call_analyst", "index": 0}
+
+event: agent_delta
+data: {"agent": "call_analyst", "delta": "...streaming token..."}
+
+event: agent_complete
+data: {"agent": "call_analyst", "output": {...}, "duration_ms": 14200}
+
+event: hubspot_sync
+data: {"contact_id": "...", "deal_id": "...", "contact_url": "..."}
+
+event: pipeline_complete
+data: {"call_id": "...", "score": "hot", "confidence": 88, "actions": [...]}
+
+event: error
+data: {"message": "...", "agent": "..."}
+```
+
+The same pattern is used for `/workflow-draft`, `/workflow-refine`, and
+`/jarvis` so the Railway edge proxy never sees a 60-second idle.
 
 ---
 
-Built in a few late nights. Powered by Claude Opus 4.7.
+## Architecture rule
+
+> **Architect from V5. Build from V1.**
+
+Every feature was designed with the V5 multi-tenant platform in mind, then
+stripped to its V1 implementation. V3 / V4 / V5 appear as locked surfaces
+inside the app — real design, real descriptions, real vision — at
+`/roadmap`. The Sidebar's Roadmap nav and the TopBar's V1 / V2 / V3–V5
+tabs link directly to those sections.
+
+---
+
+## The story
+
+We started with **FlowForge** — a generic AI workflow builder. *"Describe
+your automation, get n8n JSON."* Safe idea. Already exists.
+
+Then we stopped and asked: what problem do we *actually* know?
+
+Three years building AI automation for real estate agencies. Watching sales
+reps lose $18k deals because nobody called back for three days. Not because
+they didn't care. Because follow-up is manual, and manual things get dropped.
+
+We threw away FlowForge and built **BridgeFlow Operator**.
+
+Upload a call. 90 seconds later: qualified lead, personalized emails
+referencing what the prospect actually said, CRM note in the rep's voice,
+HubSpot deal created, and a Telegram message asking for approval before
+anything sends.
+
+Nobody pointed Opus 4.7 at that gap. We did.
+
+---
+
+## Built with
+
+- [Claude Code](https://claude.com/claude-code) — entire codebase
+- [Claude Opus 4.7](https://www.anthropic.com/claude) — all 5 agents + consultant + workflow generator
+- [Claude Haiku 4.5](https://www.anthropic.com/claude) — Jarvis screen-sense vision
+- [Groq](https://groq.com) — Whisper transcription
+- [Supabase](https://supabase.com) — Postgres + REST
+- [Resend](https://resend.com) — email delivery
+- [HubSpot](https://www.hubspot.com) — CRM
+- [ElevenLabs](https://elevenlabs.io) — voice assistant TTS
+- [Vercel](https://vercel.com) — frontend hosting
+- [Railway](https://railway.app) — backend hosting
+
+---
+
+## License
+
+MIT — every component (backend, frontend, prompts, schemas) is open source
+per the hackathon rules.
+
+---
+
+**Built in 45 hours for the *Built with Opus 4.7* hackathon.**
+**[operator.bridgeflow.agency](https://operator.bridgeflow.agency)**

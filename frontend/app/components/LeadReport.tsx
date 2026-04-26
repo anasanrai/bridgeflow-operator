@@ -68,6 +68,11 @@ export function LeadReport({ results }: Props) {
             {qualification.score_reasoning}
           </div>
         )}
+
+        <BantPanel
+          callAnalysis={call_analysis}
+          score={score}
+        />
       </section>
 
       <section className="rounded-xl border border-border bg-surface shadow-inset-hair p-5">
@@ -174,4 +179,192 @@ function Stat({ label, value }: { label: string; value: string }) {
 function fmtDecision(d: string | undefined): string {
   if (!d) return "—";
   return d.replace(/_/g, " ");
+}
+
+// ── BANT panel ──────────────────────────────────────────────────────────
+// Derives Budget / Authority / Need / Timeline as High/Medium/Low from the
+// Call Analyst's structured output. We don't store BANT explicitly — Opus
+// already gives us budget.mentioned, intent, timeline.urgency, pain_points
+// and objections. This is the operator-facing summary of those signals.
+
+type BantLevel = "high" | "medium" | "low";
+
+function deriveBant(callAnalysis: any, score: string): {
+  budget: { level: BantLevel; note: string };
+  authority: { level: BantLevel; note: string };
+  need: { level: BantLevel; note: string };
+  timeline: { level: BantLevel; note: string };
+} {
+  const ca = callAnalysis || {};
+  const budget = ca.budget || {};
+  const timeline = ca.timeline || {};
+  const intent = (ca.intent ?? "").toLowerCase();
+  const pain = Array.isArray(ca.pain_points) ? ca.pain_points.length : 0;
+  const objections = Array.isArray(ca.objections) ? ca.objections : [];
+  const role = (ca.prospect?.role ?? "").toLowerCase();
+  const flags = Array.isArray(ca.red_flags) ? ca.red_flags : [];
+
+  // Budget: mentioned + amount + flexibility
+  const budgetLevel: BantLevel = (() => {
+    if (!budget.mentioned) return "low";
+    const flex = (budget.flexibility ?? "unknown").toLowerCase();
+    const hasAmount = budget.amount && budget.amount !== "Unknown";
+    if (hasAmount && flex === "flexible") return "high";
+    if (hasAmount) return "medium";
+    return "medium";
+  })();
+  const budgetNote = (() => {
+    if (!budget.mentioned) return "Not discussed on the call";
+    if (budget.amount && budget.amount !== "Unknown") return budget.amount;
+    return "Mentioned, no number";
+  })();
+
+  // Authority: derive from role + objections that mention partners/approvers
+  const partnerSignal = objections
+    .concat(flags)
+    .some((o: string) => /partner|approve|sign[- ]?off|board|cfo|legal/i.test(o ?? ""));
+  const ownerRole =
+    /founder|owner|ceo|partner|principal|head|director|gm|managing/i.test(role);
+  const authorityLevel: BantLevel = ownerRole && !partnerSignal
+    ? "high"
+    : ownerRole || !partnerSignal
+    ? "medium"
+    : "low";
+  const authorityNote = ownerRole
+    ? `${role.split(/[\s/]/)[0] || "Owner"}-level contact`
+    : partnerSignal
+    ? "Needs partner / approver sign-off"
+    : "Role unclear from call";
+
+  // Need: intent + pain points
+  const needLevel: BantLevel = (() => {
+    if (intent === "buying" && pain >= 1) return "high";
+    if (intent === "buying" || pain >= 2) return "high";
+    if (intent === "exploring" && pain >= 1) return "medium";
+    if (intent === "exploring") return "medium";
+    return "low";
+  })();
+  const needNote = pain > 0
+    ? `${pain} pain point${pain === 1 ? "" : "s"} surfaced`
+    : intent === "buying"
+    ? "Strong buying language"
+    : intent || "No clear need";
+
+  // Timeline: urgency
+  const urgency = (timeline.urgency ?? "unknown").toLowerCase();
+  const timelineLevel: BantLevel =
+    urgency === "immediate"
+      ? "high"
+      : urgency === "30_days"
+      ? "high"
+      : urgency === "90_days"
+      ? "medium"
+      : urgency === "no_urgency"
+      ? "low"
+      : "low";
+  const timelineNote = (() => {
+    if (urgency === "immediate") return "Immediate";
+    if (urgency === "30_days") return "Within 30 days";
+    if (urgency === "90_days") return "Within ~90 days";
+    if (urgency === "no_urgency") return "No stated urgency";
+    return timeline.detail || "Not discussed";
+  })();
+
+  // Soft-correct using the qualification score — if the qualifier said HOT
+  // but the derivation came back uniformly low, bump the lowest-confidence
+  // dimension. Cheap regression guard against under-derivation.
+  const s = (score || "").toLowerCase();
+  const result = {
+    budget: { level: budgetLevel, note: budgetNote },
+    authority: { level: authorityLevel, note: authorityNote },
+    need: { level: needLevel, note: needNote },
+    timeline: { level: timelineLevel, note: timelineNote },
+  };
+  if (s === "hot") {
+    // Promote any 'low' to 'medium' — HOT shouldn't have flat-low BANT.
+    (Object.keys(result) as Array<keyof typeof result>).forEach((k) => {
+      if (result[k].level === "low") result[k].level = "medium";
+    });
+  }
+  return result;
+}
+
+function BantPanel({
+  callAnalysis,
+  score,
+}: {
+  callAnalysis: any;
+  score: string;
+}) {
+  const bant = deriveBant(callAnalysis, score);
+  const rows: Array<{
+    label: string;
+    letter: string;
+    level: BantLevel;
+    note: string;
+  }> = [
+    { label: "Budget", letter: "B", level: bant.budget.level, note: bant.budget.note },
+    { label: "Authority", letter: "A", level: bant.authority.level, note: bant.authority.note },
+    { label: "Need", letter: "N", level: bant.need.level, note: bant.need.note },
+    { label: "Timeline", letter: "T", level: bant.timeline.level, note: bant.timeline.note },
+  ];
+
+  const tone: Record<BantLevel, { dot: string; chip: string; label: string }> = {
+    high: {
+      dot: "bg-accent shadow-glow-accent",
+      chip: "border-accent/40 text-accent bg-accent/10",
+      label: "HIGH",
+    },
+    medium: {
+      dot: "bg-amber-400",
+      chip: "border-amber-500/40 text-amber-200 bg-amber-500/10",
+      label: "MEDIUM",
+    },
+    low: {
+      dot: "bg-hot",
+      chip: "border-hot/40 text-hot bg-hot/10",
+      label: "LOW",
+    },
+  };
+
+  return (
+    <div className="px-5 py-4 border-t border-border">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[10px] font-medium uppercase tracking-wider text-faint">
+          BANT signal
+        </div>
+        <span className="text-[10px] font-mono text-faint">
+          derived from call analysis
+        </span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {rows.map((r) => {
+          const t = tone[r.level];
+          return (
+            <div
+              key={r.label}
+              className="rounded-md border border-border bg-bg/40 p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${t.dot}`} />
+                  <span className="text-[12px] font-semibold text-ink">
+                    {r.label}
+                  </span>
+                </div>
+                <span
+                  className={`text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${t.chip}`}
+                >
+                  {t.label}
+                </span>
+              </div>
+              <div className="mt-1.5 text-[11px] text-muted leading-relaxed">
+                {r.note}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }

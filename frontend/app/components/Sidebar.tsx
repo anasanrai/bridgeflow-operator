@@ -238,6 +238,7 @@ export function Sidebar() {
           </Link>
         </nav>
 
+        <RoadmapNav />
         <CredentialStatus />
       </aside>
     </>
@@ -283,6 +284,62 @@ export function profileCompleteness(profile: any): Completeness {
   if (reqFilled === REQUIRED_FIELDS.length && optFilled >= 3) return "complete";
   if (reqFilled === 0 && optFilled === 0) return "empty";
   return "partial";
+}
+
+// ── Roadmap nav (V3 / V4 / V5) ─────────────────────────────────────────
+// Three locked items above the Integrations panel. Clicking opens the
+// /roadmap page (same destination for all three — that page anchors to
+// each section). Colors lifted from the BridgeFlow Agency design ref.
+
+function RoadmapNav() {
+  const items: Array<{
+    href: string;
+    label: string;
+    badge: string;
+    color: string;
+  }> = [
+    { href: "/roadmap#v3", label: "V3 · Call Center", badge: "COMING", color: "#a78bfa" },
+    { href: "/roadmap#v4", label: "V4 · Agency", badge: "6MO", color: "#f59e0b" },
+    { href: "/roadmap#v5", label: "V5 · Platform", badge: "$1M", color: "#eab308" },
+  ];
+  return (
+    <div className="border-t border-border p-3 space-y-1">
+      <div className="px-1 text-[10px] font-medium uppercase tracking-wider text-faint">
+        Roadmap
+      </div>
+      <ul className="space-y-0.5">
+        {items.map((it) => (
+          <li key={it.href}>
+            <Link
+              href={it.href}
+              className="group flex items-center gap-2 px-1.5 py-1 rounded text-[11px] hover:bg-white/[0.03] transition-colors cursor-pointer"
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full shrink-0"
+                style={{
+                  backgroundColor: it.color,
+                  boxShadow: `0 0 6px ${it.color}88`,
+                }}
+              />
+              <span className="text-ink-muted group-hover:text-ink truncate">
+                {it.label}
+              </span>
+              <span
+                className="ml-auto text-[9px] font-mono uppercase tracking-wider px-1 py-0.5 rounded border"
+                style={{
+                  color: it.color,
+                  borderColor: `${it.color}55`,
+                  background: `${it.color}10`,
+                }}
+              >
+                {it.badge}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function CompletenessDot({ value }: { value: Completeness }) {

@@ -253,6 +253,7 @@ function Header({
               </button>
             );
           })()}
+          <PlatformSelector />
           <button
             onClick={onGenerate}
             disabled={running}
@@ -273,6 +274,54 @@ function Header({
           <StepPill key={s.key} label={s.label} status={steps[s.key]} />
         ))}
       </ol>
+    </div>
+  );
+}
+
+// ── Platform selector ──────────────────────────────────────────────────
+// n8n is the only live target — Zapier and Make are locked Coming-soon
+// placeholders so judges can see the export-target ambition without us
+// shipping half-finished export formats. Click on locked = toast.
+
+function PlatformSelector() {
+  return (
+    <div
+      role="tablist"
+      aria-label="Workflow export target"
+      className="hidden sm:inline-flex items-center gap-1 p-1 rounded-md border border-border bg-bg"
+    >
+      <span className="text-[10px] font-mono uppercase tracking-wider text-faint px-1.5">
+        Platform
+      </span>
+      <button
+        role="tab"
+        aria-selected="true"
+        title="n8n — generates real importable JSON now"
+        className="inline-flex items-center gap-1.5 text-[11px] font-mono px-2 py-1 rounded border border-accent/45 bg-accent/[0.10] text-accent cursor-default shadow-glow-accent"
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent" />
+        n8n
+      </button>
+      <button
+        role="tab"
+        aria-selected="false"
+        disabled
+        title="Export format coming soon"
+        className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded border border-border bg-surface text-faint cursor-not-allowed"
+      >
+        <IconLock className="w-2.5 h-2.5" />
+        Zapier
+      </button>
+      <button
+        role="tab"
+        aria-selected="false"
+        disabled
+        title="Export format coming soon"
+        className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-1 rounded border border-border bg-surface text-faint cursor-not-allowed"
+      >
+        <IconLock className="w-2.5 h-2.5" />
+        Make
+      </button>
     </div>
   );
 }

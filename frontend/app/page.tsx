@@ -94,50 +94,74 @@ function Hackathon() {
 }
 
 // ── Pipeline poster (5-agent visual under the hero) ─────────────────────
+// Colors lifted directly from the BridgeFlow Agency design reference so
+// the marketing surface and the in-app agent stream stay visually coherent.
+
+const HERO_AGENTS: Array<{
+  num: string;
+  name: string;
+  sub: string;
+  color: string;
+  glyph: string;
+}> = [
+  { num: "01", name: "Call Analyst", sub: "intent · budget · objections", color: "#00D4AA", glyph: "◆" },
+  { num: "02", name: "Lead Qualifier", sub: "HOT / WARM / COLD", color: "#22c55e", glyph: "◈" },
+  { num: "03", name: "Campaign Architect", sub: "3-touch follow-up", color: "#a78bfa", glyph: "◉" },
+  { num: "04", name: "Action Executor", sub: "manifest + integrations", color: "#f59e0b", glyph: "◍" },
+  { num: "05", name: "Reflection", sub: "QA + rep briefing", color: "#3b82f6", glyph: "◎" },
+];
 
 function PipelinePoster() {
-  const agents = [
-    { n: "Agent 1", t: "Call Analyst", s: "intent · budget · objections" },
-    { n: "Agent 2", t: "Lead Qualifier", s: "HOT / WARM / COLD" },
-    { n: "Agent 3", t: "Campaign Architect", s: "3-touch follow-up" },
-    { n: "Agent 4", t: "Action Executor", s: "manifest + integrations" },
-    { n: "Agent 5", t: "Reflection", s: "QA + rep briefing" },
-  ];
   return (
     <section className="mt-14 relative">
       <div className="text-[10px] font-mono uppercase tracking-wider text-faint">
         The pipeline
       </div>
       <div className="mt-3 grid grid-cols-1 md:grid-cols-5 gap-3">
-        {agents.map((a, i) => (
+        {HERO_AGENTS.map((a) => (
           <div
-            key={a.n}
-            className="relative rounded-xl border border-border bg-surface p-4 overflow-hidden"
+            key={a.num}
+            className="relative rounded-xl border border-border bg-surface p-4 overflow-hidden transition-colors hover:bg-surface-2"
+            style={{ borderTopColor: `${a.color}55`, borderTopWidth: 2 }}
           >
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/40 to-transparent" />
-            <div className="text-[10px] font-mono uppercase tracking-wider text-accent/80">
-              {a.n}
+            <div className="flex items-center justify-between">
+              <span
+                className="text-[10px] font-mono uppercase tracking-wider"
+                style={{ color: a.color }}
+              >
+                Agent {a.num}
+              </span>
+              <span
+                className="text-base leading-none"
+                style={{ color: a.color }}
+                aria-hidden
+              >
+                {a.glyph}
+              </span>
             </div>
-            <div className="mt-1 text-sm font-semibold text-ink">{a.t}</div>
-            <div className="mt-1 text-[11px] text-muted leading-relaxed">{a.s}</div>
-            <div className="absolute bottom-2 right-2 text-[10px] font-mono text-faint">
-              {String(i + 1).padStart(2, "0")}
+            <div className="mt-2 text-sm font-semibold text-ink">{a.name}</div>
+            <div className="mt-1 text-[11px] text-muted leading-relaxed">
+              {a.sub}
             </div>
+            <div
+              className="mt-3 h-px"
+              style={{
+                background: `linear-gradient(90deg, ${a.color}66 0%, transparent 100%)`,
+              }}
+            />
           </div>
         ))}
       </div>
 
-      <div className="mt-3 flex items-center gap-3 text-[11px] font-mono text-faint">
+      <div className="mt-3 flex items-center gap-3 text-[11px] font-mono text-faint flex-wrap">
         <span className="inline-flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent" />
-          single model
+          <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent animate-blink" />
+          single model · claude-opus-4-7
         </span>
-        <span>·</span>
-        <span>claude-opus-4-7</span>
         <span>·</span>
         <span>streaming SSE</span>
         <span>·</span>
-        <span>real Resend / Telegram fires</span>
+        <span>real Resend / Telegram / HubSpot fires</span>
       </div>
     </section>
   );
