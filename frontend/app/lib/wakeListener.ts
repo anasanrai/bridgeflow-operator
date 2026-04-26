@@ -55,6 +55,10 @@ export interface WakeListenerHandle {
   interim: string;
   start: () => void;          // user-gesture entry point
   stop: () => void;
+  /** Skip the wake-word requirement for the next utterance — used when
+   *  the operator taps the mic button instead of saying "Jarvis".
+   *  Ensures we never have two SR instances racing. */
+  forceAwake: () => void;
   permissionDenied: boolean;
   unsupported: boolean;
 }
@@ -341,11 +345,33 @@ export function useWakeListener(opts: WakeListenerOpts): WakeListenerHandle {
     };
   }, []);
 
+  /** Force the listener into AWAKE state immediately — used by the manual
+   *  mic button so we don't spawn a second SR instance. If the listener
+   *  is OFF, start it first (caller must already have user-gesture
+   *  permission). */
+  const forceAwake = useCallback(() => {
+    if (!SUPPORTED) return;
+    if (!recogRef.current) {
+      wantRunningRef.current = true;
+      startRecognition();
+    }
+    // Jump to awake regardless of current state so a tap interrupts the
+    // current playback path.
+    cmdAccumRef.current = "";
+    setInterim("");
+    setStateBoth("awake");
+    if (cmdMaxTimerRef.current) clearTimeout(cmdMaxTimerRef.current);
+    cmdMaxTimerRef.current = window.setTimeout(() => {
+      commitCommand();
+    }, COMMAND_MAX_MS);
+  }, [startRecognition, commitCommand]);
+
   return {
     state,
     interim,
     start,
     stop,
+    forceAwake,
     permissionDenied,
     unsupported: !SUPPORTED,
   };

@@ -105,6 +105,22 @@ class JarvisRequest(BaseModel):
     # is rewritten with the operator's chosen identity. Free-form, capped to
     # ~600 chars on validation.
     persona: str | None = Field(default=None, max_length=600)
+    # Identity layer: how Jarvis addresses the operator + Jarvis's own
+    # self-perception. Both override the defaults baked into jarvis.py.
+    owner_identity: str | None = Field(default=None, max_length=80)
+    jarvis_identity: str | None = Field(default=None, max_length=600)
+
+
+class JarvisVisionRequest(BaseModel):
+    """Vision turn — operator shared their screen and we captured one
+    frame. Routes to Claude Haiku 4.5 (fast, cheap, good vision)."""
+    message: str = ""
+    image_base64: str = Field(..., description="JPEG/PNG base64 (no data: prefix)")
+    image_media_type: str = Field(default="image/jpeg")
+    current_page: str | None = None
+    conversation_history: list[ConsultantMessage] = Field(default_factory=list)
+    owner_identity: str | None = Field(default=None, max_length=80)
+    jarvis_identity: str | None = Field(default=None, max_length=600)
 
 
 class TTSRequest(BaseModel):

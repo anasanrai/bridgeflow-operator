@@ -27,6 +27,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   IconChevron,
+  IconEye,
+  IconEyeOff,
   IconLogo,
   IconRefresh,
   IconSparkle,
@@ -82,6 +84,92 @@ export function JarvisOverlay() {
   // bleed-through (when SR re-recognizes Jarvis's own voice through the
   // speaker as if the user said it). Refreshed every sentence.
   const [speakingTail, setSpeakingTail] = useState("");
+
+  // ── Vision (Claude Haiku 4.5 screen sense) ──────────────────────────
+  // Operator-toggled. When on, we hold a getDisplayMedia stream and
+  // capture a single JPEG frame on each turn — routed to /jarvis-vision
+  // instead of /jarvis. Stream lifecycle: started when operator clicks
+  // the eye, stopped when toggled off, the panel closes, or the browser
+  // tab cancels sharing.
+  const [visionActive, setVisionActive] = useState(false);
+  const [visionErr, setVisionErr] = useState<string | null>(null);
+  const visionStreamRef = useRef<MediaStream | null>(null);
+  const visionVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  const stopVision = useCallback(() => {
+    try {
+      visionStreamRef.current?.getTracks().forEach((t) => t.stop());
+    } catch {
+      // ignore
+    }
+    visionStreamRef.current = null;
+    visionVideoRef.current = null;
+    setVisionActive(false);
+  }, []);
+
+  const startVision = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    setVisionErr(null);
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setVisionErr("Screen capture isn't supported in this browser.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 4 } as MediaTrackConstraints,
+        audio: false,
+      });
+      visionStreamRef.current = stream;
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.muted = true;
+      await video.play().catch(() => {});
+      visionVideoRef.current = video;
+      // If the operator stops sharing from the browser bar, sync state.
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => stopVision());
+      setVisionActive(true);
+    } catch (err) {
+      const e = err as Error;
+      if (e.name === "NotAllowedError") {
+        setVisionErr("Screen sharing was declined.");
+      } else {
+        setVisionErr(`Vision failed: ${e.message}`);
+      }
+      setVisionActive(false);
+    }
+  }, [stopVision]);
+
+  // Capture one JPEG (base64, no prefix) from the live stream.
+  const captureFrame = useCallback((): string | null => {
+    const v = visionVideoRef.current;
+    if (!v || !v.videoWidth) return null;
+    // Downscale to ~1280px max long edge — Haiku doesn't need 4K.
+    const MAX = 1280;
+    const ratio = Math.min(MAX / v.videoWidth, MAX / v.videoHeight, 1);
+    const w = Math.round(v.videoWidth * ratio);
+    const h = Math.round(v.videoHeight * ratio);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(v, 0, 0, w, h);
+    const url = canvas.toDataURL("image/jpeg", 0.7);
+    const comma = url.indexOf(",");
+    return comma >= 0 ? url.slice(comma + 1) : null;
+  }, []);
+
+  // Auto-stop vision on unmount.
+  useEffect(() => {
+    return () => stopVision();
+  }, [stopVision]);
+
+  // Auto-dismiss the vision error after 4s — same UX as voiceErr.
+  useEffect(() => {
+    if (!visionErr) return;
+    const t = setTimeout(() => setVisionErr(null), 4000);
+    return () => clearTimeout(t);
+  }, [visionErr]);
 
   const stopAllAudio = useCallback(() => {
     try {
@@ -239,9 +327,27 @@ export function JarvisOverlay() {
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, open]);
 
-  // ── Voice input ─────────────────────────────────────────────────────
+  // ── Voice input (manual mic button) ─────────────────────────────────
+  // When always-on is enabled, we delegate to the wake listener via
+  // forceAwake() so we never spawn a second SR instance — that's what
+  // was throwing "Voice error: aborted". When always-on is OFF, we fall
+  // back to a temporary one-shot SR session.
   const startListening = useCallback(() => {
     if (typeof window === "undefined") return;
+    setVoiceErr(null);
+    stopAllAudio();
+    if (settings.always_on) {
+      // Use the global wake listener. It's already running; just force it
+      // straight into AWAKE so the user doesn't have to say the wake word.
+      try {
+        wakeRef.current?.forceAwake();
+        setListening(true);
+      } catch (err) {
+        setVoiceErr(`Could not start listening: ${(err as Error).message}`);
+      }
+      return;
+    }
+    // Always-on disabled → temp SR session.
     const SR =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
@@ -250,9 +356,6 @@ export function JarvisOverlay() {
       );
       return;
     }
-    setVoiceErr(null);
-    // Stop any in-flight TTS so the user can interrupt cleanly.
-    stopAllAudio();
     const r = new SR();
     r.continuous = false;
     r.interimResults = true;
@@ -269,6 +372,8 @@ export function JarvisOverlay() {
     };
     r.onerror = (e: any) => {
       setListening(false);
+      // "aborted" is a benign close (e.g. tab switched); don't alarm the user.
+      if (e.error === "aborted") return;
       setVoiceErr(
         e.error === "not-allowed"
           ? "Microphone permission denied — enable it in browser settings."
@@ -290,16 +395,29 @@ export function JarvisOverlay() {
       setListening(false);
       setVoiceErr(`Could not start listening: ${(err as Error).message}`);
     }
-  }, [stopAllAudio]);
+  }, [stopAllAudio, settings.always_on]);
 
   const stopListening = useCallback(() => {
+    if (settings.always_on) {
+      // Manual press-and-release on the wake listener path is a no-op —
+      // the listener handles end-of-utterance via its silence debounce.
+      setListening(false);
+      return;
+    }
     try {
       recognitionRef.current?.stop();
     } catch {
       // ignore
     }
     setListening(false);
-  }, []);
+  }, [settings.always_on]);
+
+  // Auto-dismiss the voice error banner after 4s so it doesn't haunt the UI.
+  useEffect(() => {
+    if (!voiceErr) return;
+    const t = setTimeout(() => setVoiceErr(null), 4000);
+    return () => clearTimeout(t);
+  }, [voiceErr]);
 
   // ── Action directives ───────────────────────────────────────────────
   const executeAction = useCallback(
@@ -390,20 +508,44 @@ export function JarvisOverlay() {
         }
       };
 
+      // If vision is active and the stream is healthy, grab a frame and
+      // route through /jarvis-vision (Claude Haiku 4.5). Otherwise the
+      // standard /jarvis path (Opus 4.7).
+      let frame: string | null = null;
+      if (
+        settings.vision_enabled &&
+        visionActive &&
+        opts.kind !== "greeting"
+      ) {
+        try {
+          frame = captureFrame();
+        } catch {
+          frame = null;
+        }
+      }
+      const targetUrl = frame ? "/api/jarvis-vision" : "/api/jarvis";
+      const body: Record<string, unknown> = {
+        message: trimmed,
+        current_page: pathname,
+        owner_identity: settings.owner_identity || undefined,
+        jarvis_identity: settings.jarvis_identity || undefined,
+        conversation_history: messages
+          .filter((m) => !m.streaming)
+          .slice(-12)
+          .map((m) => ({ role: m.role, content: m.content })),
+      };
+      if (frame) {
+        body.image_base64 = frame;
+        body.image_media_type = "image/jpeg";
+      } else {
+        body.kind = opts.kind ?? "user";
+        body.persona = resolvePersona(settings) || undefined;
+      }
       try {
-        const resp = await fetch("/api/jarvis", {
+        const resp = await fetch(targetUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: trimmed,
-            kind: opts.kind ?? "user",
-            current_page: pathname,
-            persona: resolvePersona(settings) || undefined,
-            conversation_history: messages
-              .filter((m) => !m.streaming)
-              .slice(-12)
-              .map((m) => ({ role: m.role, content: m.content })),
-          }),
+          body: JSON.stringify(body),
           signal: ctrl.signal,
         });
         if (!resp.ok || !resp.body) {
@@ -487,6 +629,8 @@ export function JarvisOverlay() {
       executeAction,
       enqueueSentenceTTS,
       stopAllAudio,
+      visionActive,
+      captureFrame,
     ]
   );
 
@@ -519,6 +663,12 @@ export function JarvisOverlay() {
     onInterrupt: handleInterrupt,
     bargeIn: settings.barge_in,
   });
+  // Stable ref so the manual mic button can call wakeListener.forceAwake()
+  // without re-creating the startListening callback on every state tick.
+  const wakeRef = useRef(wakeListener);
+  useEffect(() => {
+    wakeRef.current = wakeListener;
+  }, [wakeListener]);
 
   // Attempt to start the listener on mount when always-on is enabled AND
   // permission was previously granted (subsequent mounts don't need a
@@ -630,6 +780,12 @@ export function JarvisOverlay() {
             providerLabel={
               settings.provider === "elevenlabs" ? "elevenlabs · daniel" : "browser tts"
             }
+            visionAvailable={settings.vision_enabled}
+            visionActive={visionActive}
+            visionErr={visionErr}
+            onToggleVision={() =>
+              visionActive ? stopVision() : void startVision()
+            }
           />
         ) : (
           <JarvisFab
@@ -726,6 +882,10 @@ function JarvisPanel({
   alwaysOn,
   wakeWord,
   onEnableWake,
+  visionAvailable,
+  visionActive,
+  visionErr,
+  onToggleVision,
 }: {
   messages: Msg[];
   input: string;
@@ -749,6 +909,10 @@ function JarvisPanel({
   alwaysOn: boolean;
   wakeWord: string;
   onEnableWake: () => void;
+  visionAvailable: boolean;
+  visionActive: boolean;
+  visionErr: string | null;
+  onToggleVision: () => void;
 }) {
   const showEnableWake =
     alwaysOn && !wakeUnsupported && wakeState === "off" && !wakePermissionDenied;
@@ -806,6 +970,29 @@ function JarvisPanel({
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {visionAvailable && (
+            <button
+              onClick={onToggleVision}
+              title={
+                visionActive
+                  ? "Stop screen sense"
+                  : "Let Jarvis see your screen (Haiku 4.5)"
+              }
+              aria-pressed={visionActive}
+              aria-label="Toggle vision"
+              className={`w-7 h-7 rounded-md border flex items-center justify-center cursor-pointer transition-colors ${
+                visionActive
+                  ? "border-accent/45 bg-accent/[0.10] text-accent shadow-glow-accent"
+                  : "border-border text-muted hover:text-ink hover:bg-surface-2"
+              }`}
+            >
+              {visionActive ? (
+                <IconEye className="w-3.5 h-3.5" />
+              ) : (
+                <IconEyeOff className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
           <a
             href="/settings/ai"
             title="Voice + persona settings"
@@ -872,6 +1059,17 @@ function JarvisPanel({
       {voiceErr && (
         <div className="px-4 py-2 border-t border-hot/30 bg-hot/[0.05] text-[11px] text-hot">
           {voiceErr}
+        </div>
+      )}
+      {visionErr && (
+        <div className="px-4 py-2 border-t border-hot/30 bg-hot/[0.05] text-[11px] text-hot">
+          {visionErr}
+        </div>
+      )}
+      {visionActive && !visionErr && (
+        <div className="px-4 py-1.5 border-t border-accent/30 bg-accent/[0.05] text-[10px] font-mono uppercase tracking-wider text-accent flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent animate-blink" />
+          screen sense live · haiku 4.5
         </div>
       )}
 

@@ -91,6 +91,20 @@ export interface JarvisSettings {
   always_on: boolean;        // continuous mic + wake-word activation
   wake_word: string;         // lowercase phrase to listen for, e.g. "jarvis"
   barge_in: boolean;         // user can interrupt Jarvis mid-sentence
+
+  // Identity layer
+  /** How Jarvis addresses the operator. "sir" = J.A.R.V.I.S. canonical.
+   *  Free-form: "boss", "Anasan", first name, etc. */
+  owner_identity: string;
+  /** Who Jarvis IS — self-perception block. Free-form, ~600 char cap.
+   *  Prepended to the system prompt so Jarvis maintains a stable
+   *  persona even when the personality preset changes. */
+  jarvis_identity: string;
+
+  // Vision (V3-feeling, but live)
+  /** Master toggle. When true, Jarvis can use the operator's screen as
+   *  context. Capture happens on each turn, only when a stream is active. */
+  vision_enabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: JarvisSettings = {
@@ -99,9 +113,15 @@ export const DEFAULT_SETTINGS: JarvisSettings = {
   personality_id: "jarvis",
   custom_persona: "",
   voice_enabled: true,
-  always_on: true,           // ON by default — operator wanted Alexa/Siri behaviour
+  always_on: true,
   wake_word: "jarvis",
   barge_in: true,
+  owner_identity: "sir",
+  jarvis_identity:
+    "I am Jarvis, the operator's senior AI assistant for BridgeFlow. " +
+    "I am calm, capable, and direct. I never panic. I treat the operator " +
+    "like Tony Stark's J.A.R.V.I.S. would — fast, deferential, witty.",
+  vision_enabled: false,
 };
 
 const STORAGE_KEY = "bridgeflow.jarvis.settings.v1";

@@ -107,6 +107,8 @@ export default function AISettingsPage() {
             testMsg={testMsg}
           />
           <ConversationCard settings={settings} update={update} />
+          <IdentityCard settings={settings} update={update} />
+          <VisionCard settings={settings} update={update} />
           <PersonalityCard
             settings={settings}
             update={update}
@@ -418,6 +420,117 @@ function ConversationCard({
         <Toggle
           value={settings.barge_in}
           onChange={(v) => update({ barge_in: v })}
+        />
+      </div>
+    </Section>
+  );
+}
+
+// ── Identity card (owner identity + Jarvis identity) ──────────────────
+
+function IdentityCard({
+  settings,
+  update,
+}: {
+  settings: ReturnType<typeof useJarvisSettings>[0];
+  update: ReturnType<typeof useJarvisSettings>[1];
+}) {
+  const [owner, setOwner] = useState(settings.owner_identity);
+  const [jarvis, setJarvis] = useState(settings.jarvis_identity);
+  useEffect(() => setOwner(settings.owner_identity), [settings.owner_identity]);
+  useEffect(() => setJarvis(settings.jarvis_identity), [settings.jarvis_identity]);
+
+  return (
+    <Section title="Identity" icon={<IconUsers className="w-4 h-4" />}>
+      <div className="rounded-lg border border-border bg-bg/40 p-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-faint">
+            Owner identity
+          </div>
+          <span className="text-[10px] font-mono text-faint">
+            how Jarvis addresses you
+          </span>
+        </div>
+        <input
+          value={owner}
+          onChange={(e) => setOwner(e.target.value.slice(0, 80))}
+          onBlur={() => update({ owner_identity: owner.trim() || "sir" })}
+          placeholder="sir"
+          className="w-full rounded-md bg-bg border border-border px-3 py-1.5 text-[13px] font-mono text-ink placeholder:text-faint focus:outline-none focus:border-accent/45"
+        />
+        <div className="text-[11px] text-muted mt-1.5 leading-relaxed">
+          Examples: <span className="font-mono text-ink-muted">sir</span> ·{" "}
+          <span className="font-mono text-ink-muted">boss</span> ·{" "}
+          <span className="font-mono text-ink-muted">Anasan</span> · your first
+          name. Default <span className="font-mono">sir</span> is the canonical
+          J.A.R.V.I.S. address.
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-bg/40 p-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-faint">
+            Jarvis identity
+          </div>
+          <span className="text-[10px] font-mono text-faint">
+            who Jarvis IS · self-perception
+          </span>
+        </div>
+        <textarea
+          value={jarvis}
+          onChange={(e) => setJarvis(e.target.value.slice(0, 600))}
+          onBlur={() => update({ jarvis_identity: jarvis.trim() })}
+          rows={4}
+          placeholder="I am Jarvis, the operator's senior AI assistant for BridgeFlow. I am calm, capable, and direct. I never panic. I treat the operator like Tony Stark's J.A.R.V.I.S. would — fast, deferential, witty."
+          className="w-full rounded-md bg-bg border border-border px-3 py-2 text-[13px] leading-relaxed text-ink placeholder:text-faint focus:outline-none focus:border-accent/45 resize-y scrollbar-thin"
+        />
+        <div className="flex items-center justify-between mt-1">
+          <div className="text-[11px] text-muted leading-relaxed">
+            Prepended above the system prompt — survives personality preset
+            changes so Jarvis keeps a stable self-image.
+          </div>
+          <div className="text-[10px] text-faint shrink-0 ml-2">
+            {jarvis.length} / 600
+          </div>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+// ── Vision card (Claude Haiku 4.5 screen-sense) ───────────────────────
+
+function VisionCard({
+  settings,
+  update,
+}: {
+  settings: ReturnType<typeof useJarvisSettings>[0];
+  update: ReturnType<typeof useJarvisSettings>[1];
+}) {
+  return (
+    <Section title="Vision" icon={<IconSparkle className="w-4 h-4" />}>
+      <div className="rounded-lg border border-border bg-bg/40 p-3 flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-[12px] font-semibold text-ink flex items-center gap-2">
+            Screen sense
+            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent/40 text-accent bg-accent/10">
+              Haiku 4.5
+            </span>
+          </div>
+          <div className="text-[11px] text-muted mt-1 leading-relaxed max-w-xl">
+            When enabled, Jarvis can look at your screen on each turn and
+            answer about what's on it. "What does this lead row mean?" "Where's
+            the approve button?" — Jarvis points the cursor for you. Routed
+            through Claude Haiku 4.5 for fast, cheap vision.
+          </div>
+          <div className="text-[10px] text-faint mt-1.5 leading-relaxed">
+            You'll be asked to share a tab/window on first activation. Frames
+            never leave your machine until you ask Jarvis a question.
+          </div>
+        </div>
+        <Toggle
+          value={settings.vision_enabled}
+          onChange={(v) => update({ vision_enabled: v })}
         />
       </div>
     </Section>

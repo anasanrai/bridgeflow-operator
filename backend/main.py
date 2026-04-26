@@ -84,6 +84,7 @@ from models.schemas import (  # noqa: E402
     CredentialsRequest,
     EditApprovalRequest,
     JarvisRequest,
+    JarvisVisionRequest,
     PlaybookRequest,
     TestEmailRequest,
     TTSRequest,
@@ -639,6 +640,8 @@ async def jarvis(req: JarvisRequest) -> StreamingResponse:
         context=context,
         current_page=req.current_page,
         company_name=company_name,
+        owner_identity=req.owner_identity,
+        jarvis_identity=req.jarvis_identity,
     )
     # Operator-chosen persona override — gets prepended ABOVE the
     # canonical Jarvis system prompt so the identity / voice / tone
@@ -684,6 +687,94 @@ async def jarvis(req: JarvisRequest) -> StreamingResponse:
             async with client.messages.stream(
                 model=MODEL,
                 max_tokens=min(MAX_TOKENS, 800),  # Jarvis stays tight
+                system=system,
+                messages=messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    buf.append(text)
+                    yield f"data: {json.dumps({'type': 'delta', 'delta': text})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'{type(exc).__name__}: {exc}'})}\n\n"
+            return
+        yield f"data: {json.dumps({'type': 'done', 'full': ''.join(buf)})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+VISION_MODEL = "claude-haiku-4-5-20251001"
+
+
+@app.post("/jarvis-vision")
+async def jarvis_vision(req: JarvisVisionRequest) -> StreamingResponse:
+    """Vision turn — operator shared their screen and we captured one
+    frame. Routes to Claude Haiku 4.5 (fast + cheap + good vision)
+    instead of Opus 4.7. The system prompt mirrors /jarvis but adds an
+    instruction to ground answers in the supplied image and to call out
+    UI targets ("the green button labelled 'Approve' near the top
+    right") so the operator can find them.
+    """
+    profile = supabase_client.get_company_profile()
+    company_name = (profile or {}).get("company_name")
+    context = _jarvis_live_context()
+    base_system = build_jarvis_system(
+        context=context,
+        current_page=req.current_page,
+        company_name=company_name,
+        owner_identity=req.owner_identity,
+        jarvis_identity=req.jarvis_identity,
+    )
+    vision_addendum = (
+        "\n\n---\n\nVISION MODE: The user has shared their screen. The most "
+        "recent user message includes a JPEG of what they are currently "
+        "looking at — use it as ground truth. When pointing at UI elements, "
+        "be precise about location and label so the operator can find it "
+        "immediately (e.g. \"the green Approve button near the top right\", "
+        "\"the third row in the table — it has the orange flame icon\"). "
+        "Keep responses tight (1-3 sentences) since these are spoken aloud. "
+        "If the screen doesn't contain the answer, say so plainly."
+    )
+    system = base_system + vision_addendum
+
+    history: list[dict] = [
+        {"role": m.role, "content": m.content} for m in req.conversation_history
+    ]
+    # Latest turn = multimodal block: image + the user's question.
+    user_text = (req.message or "").strip() or "What am I looking at?"
+    messages = history + [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": req.image_media_type or "image/jpeg",
+                        "data": req.image_base64,
+                    },
+                },
+                {"type": "text", "text": user_text},
+            ],
+        }
+    ]
+
+    async def event_stream():
+        yield f"data: {json.dumps({'type': 'start'})}\n\n"
+        buf: list[str] = []
+        try:
+            from agents.base import _get_client  # type: ignore
+
+            client = _get_client()
+            async with client.messages.stream(
+                model=VISION_MODEL,
+                max_tokens=600,
                 system=system,
                 messages=messages,
             ) as stream:

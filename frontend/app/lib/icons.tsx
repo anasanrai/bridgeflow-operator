@@ -254,6 +254,22 @@ export const IconHourglass = (p: Props) => (
   </svg>
 );
 
+export const IconEye = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+export const IconEyeOff = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M3 3l18 18" />
+    <path d="M10.6 6.1A11 11 0 0 1 12 6c6 0 10 6 10 6a17 17 0 0 1-3.3 3.9" />
+    <path d="M6.6 6.6A17 17 0 0 0 2 12s4 6 10 6c1.5 0 2.9-.3 4.1-.8" />
+    <path d="M14.1 14.1A3 3 0 0 1 9.9 9.9" />
+  </svg>
+);
+
 export const IconMic = (p: Props) => (
   <svg {...base} {...p}>
     <rect x="9" y="3" width="6" height="11" rx="3" />
