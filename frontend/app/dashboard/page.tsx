@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { OperatorPulse } from "../components/OperatorPulse";
 import { StatCard } from "../components/StatCard";
 import {
   IconCheck,
@@ -66,6 +67,8 @@ export default function DashboardPage() {
           {source === "supabase" ? "live · supabase" : "demo data"}
         </span>
       </div>
+
+      <OperatorPulse />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard

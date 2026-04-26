@@ -239,6 +239,12 @@ export const IconCopy = (p: Props) => (
   </svg>
 );
 
+export const IconActivity = (p: Props) => (
+  <svg {...base} {...p}>
+    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+  </svg>
+);
+
 export const IconHourglass = (p: Props) => (
   <svg {...base} {...p}>
     <path d="M6 3h12" />
