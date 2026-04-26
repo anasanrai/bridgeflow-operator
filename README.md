@@ -336,24 +336,33 @@ The same pattern is used for `/workflow-draft`, `/workflow-refine`, and
 
 ## The story
 
-We started with **FlowForge** — a generic AI workflow builder.
+We started this two days before the hackathon deadline.
+
+The first idea was **FlowForge** — a generic AI workflow builder.
 *"Describe your automation, get n8n JSON."*
-Safe idea. Already exists.
+Already exists in five different forms. Wouldn't stand out.
 
-Then we stopped and asked: what problem do we *actually* know?
+So we asked the better question: where have we *seen* automation actually
+move money? The answer was sales follow-up. We've built workflow automation
+for real estate teams as contract work — the pattern shows up every time.
+Inbound leads come in fast, follow-up is manual, things slip, and the
+slippage is invisible until someone audits the CRM.
 
-Three years building AI automation for real estate agencies. Watching sales
-reps lose $18k deals because nobody called back for three days. Not because
-they didn't care. Because follow-up is manual, and manual things get dropped.
+We didn't have lived experience as the operator. But we'd seen the gap from
+the build side often enough to know it was real, big, and unsolved by the
+generic workflow tools. With Opus 4.7's reasoning across multiple agents,
+we could finally close it end-to-end — not just "draft an email," but
+*qualify, decide, draft, fire, and self-review* in one pass.
 
-We threw away FlowForge and built **BridgeFlow Operator**.
+So we threw away FlowForge and built **BridgeFlow Operator**.
 
-Upload a call. 90 seconds later: qualified lead, personalized emails
-referencing what the prospect actually said, CRM note in the rep's voice,
-HubSpot deal created, and a Telegram message asking you to approve before
-anything sends.
+Two days later, this is what shipped: upload a call → 90 seconds → qualified
+lead, personalized emails referencing what the prospect actually said, CRM
+note in the rep's voice, HubSpot deal created, and a Telegram message
+asking for approval before anything sends.
 
-Nobody pointed Opus 4.7 at that gap. We did.
+It's a first version of a product we'd actually ship to the agencies we
+already know. That's the bet.
 
 ![Building in terminal](docs/screenshots/building_in_terminal.png)
 
