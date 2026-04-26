@@ -74,7 +74,7 @@ export default function DashboardPage() {
         <StatCard
           label="Total leads"
           value={loading ? "—" : stats.total.toLocaleString()}
-          delta={{ value: 12 }}
+          delta={stats.total > 0 ? { value: 12 } : null}
           icon={IconUsers}
           accent="accent"
           sparkline={stats.spark.total}
@@ -82,7 +82,7 @@ export default function DashboardPage() {
         <StatCard
           label="Hot leads"
           value={loading ? "—" : stats.hot}
-          delta={{ value: 34 }}
+          delta={stats.hot > 0 ? { value: 34 } : null}
           icon={IconFlame}
           accent="hot"
           sparkline={stats.spark.hot}
@@ -90,7 +90,7 @@ export default function DashboardPage() {
         <StatCard
           label="Avg confidence"
           value={loading ? "—" : `${stats.avgConfidence}%`}
-          delta={{ value: 4, suffix: "pp" }}
+          delta={stats.avgConfidence > 0 ? { value: 4, suffix: "pp" } : null}
           icon={IconTarget}
           accent="warm"
           sparkline={stats.spark.confidence}
@@ -98,7 +98,7 @@ export default function DashboardPage() {
         <StatCard
           label="Deals won"
           value={loading ? "—" : stats.dealsWon}
-          delta={{ value: 2, suffix: "" }}
+          delta={stats.dealsWon > 0 ? { value: 2, suffix: "" } : null}
           icon={IconCheck}
           accent="cold"
           sparkline={stats.spark.won}
