@@ -14,9 +14,12 @@ import {
   IconSparkle,
   IconTarget,
 } from "../lib/icons";
+import { loadPersisted, savePersisted } from "../lib/persist";
 import { useAgentStream } from "../lib/useAgentStream";
 
 type Mode = "transcript" | "voice" | "describe" | "workflow";
+
+const MODE_KEY = "bridgeflow.pipeline.mode.v1";
 
 function leadScore(results: ReturnType<typeof useAgentStream>["results"]): string {
   const raw = (results?.qualification as any)?.score;
@@ -30,9 +33,29 @@ export default function PipelinePage() {
   const score = leadScore(pipeline.results);
   const workflowEligible = score === "HOT" || score === "WARM";
 
-  // When a pipeline run finishes with HOT/WARM, surface the workflow tab.
+  // Restore the last active tab on mount so navigating away and back
+  // lands on the same view the operator left.
   useEffect(() => {
-    if (pipeline.results && workflowEligible) setMode("workflow");
+    const saved = loadPersisted<Mode>(MODE_KEY);
+    if (saved === "transcript" || saved === "voice" || saved === "workflow") {
+      setMode(saved);
+    }
+  }, []);
+
+  // Persist tab choice on every change.
+  useEffect(() => {
+    savePersisted(MODE_KEY, mode);
+  }, [mode]);
+
+  // When a pipeline run finishes with HOT/WARM, surface the workflow tab —
+  // but only if the operator hasn't already picked a tab themselves this
+  // session. Persisted "workflow" tab from a prior visit is fine; we just
+  // don't want to clobber an explicit click on Transcript.
+  useEffect(() => {
+    if (pipeline.results && workflowEligible && mode === "transcript") {
+      setMode("workflow");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipeline.results, workflowEligible]);
 
   // If the user resets and the workflow tab is no longer valid, fall back.

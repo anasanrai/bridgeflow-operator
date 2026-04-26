@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { IconChevron, IconPlay, IconRefresh, IconSparkle, IconUpload } from "../lib/icons";
+import { clearPersisted, loadPersisted, savePersisted } from "../lib/persist";
+
+const DRAFT_KEY = "bridgeflow.pipeline.transcript_draft.v1";
 
 interface Props {
   running: boolean;
@@ -104,11 +107,33 @@ export function TranscriptUpload({ running, onRun, onReset }: Props) {
   const [demoOpen, setDemoOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const demoMenuRef = useRef<HTMLDivElement>(null);
+  const hydratedRef = useRef(false);
+
+  // Restore the in-progress draft on mount so leaving /pipeline doesn't
+  // erase what the operator pasted. Cleared by Reset.
+  useEffect(() => {
+    const draft = loadPersisted<string>(DRAFT_KEY);
+    if (typeof draft === "string" && draft) setValue(draft);
+    hydratedRef.current = true;
+  }, []);
+
+  // Persist on every change after hydration.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (value) savePersisted(DRAFT_KEY, value);
+    else clearPersisted(DRAFT_KEY);
+  }, [value]);
 
   const loadDemo = (demo: Demo) => {
     setValue(demo.transcript);
     setDemoOpen(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  const onResetClick = () => {
+    setValue("");
+    clearPersisted(DRAFT_KEY);
+    onReset();
   };
 
   // Click-outside to close the demo dropdown.
@@ -249,7 +274,7 @@ export function TranscriptUpload({ running, onRun, onReset }: Props) {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={onReset}
+              onClick={onResetClick}
               disabled={running}
               className="inline-flex items-center gap-1.5 text-xs px-3 py-2 rounded-md border border-border bg-bg hover:bg-surface-2 text-muted hover:text-ink disabled:opacity-40 transition-colors cursor-pointer"
             >

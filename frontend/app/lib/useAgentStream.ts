@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { clearPersisted, loadPersisted, savePersisted } from "./persist";
 import {
   AGENT_ORDER,
   AgentName,
@@ -9,6 +10,8 @@ import {
   PipelineResults,
   StreamEvent,
 } from "./types";
+
+const STORAGE_KEY = "bridgeflow.pipeline.run.v1";
 
 const makeIdleAgents = (): Record<AgentName, AgentState> =>
   AGENT_ORDER.reduce((acc, name) => {
@@ -44,6 +47,26 @@ export function useAgentStream() {
   });
 
   const abortRef = useRef<AbortController | null>(null);
+  const hydratedRef = useRef(false);
+
+  // Hydrate from localStorage on first mount so navigating away from
+  // /pipeline and back restores the last run. The live SSE stream itself
+  // doesn't survive — if a run was mid-flight, force running:false on
+  // hydrate so the UI reflects "this is a static snapshot, not live."
+  useEffect(() => {
+    const persisted = loadPersisted<PipelineState>(STORAGE_KEY);
+    if (persisted) {
+      setState({ ...persisted, running: false });
+    }
+    hydratedRef.current = true;
+  }, []);
+
+  // Persist every state transition. Skip the very first render so we
+  // don't overwrite freshly-hydrated state with the empty initial.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    savePersisted(STORAGE_KEY, state);
+  }, [state]);
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
@@ -56,6 +79,7 @@ export function useAgentStream() {
       error: null,
       memory: null,
     });
+    clearPersisted(STORAGE_KEY);
   }, []);
 
   const run = useCallback(async (transcript: string) => {

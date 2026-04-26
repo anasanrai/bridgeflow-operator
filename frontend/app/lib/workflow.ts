@@ -1,7 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { clearPersisted, loadPersisted, savePersisted } from "./persist";
 import { PipelineResults } from "./types";
+
+const STORAGE_KEY = "bridgeflow.pipeline.workflow.v1";
 
 // ── Shapes the backend returns ───────────────────────────────────────────
 export interface Playbook {
@@ -211,7 +214,36 @@ async function streamSseResult<T>(
 
 export function useWorkflowGenerator() {
   const [state, setState] = useState<WorkflowState>(initialState);
-  const reset = useCallback(() => setState(initialState), []);
+  const hydratedRef = useRef(false);
+
+  // Hydrate from localStorage on first mount so leaving /pipeline mid-run
+  // (or just navigating away after generation) doesn't lose the playbook,
+  // workflow JSON, credentials, or validation. Force any in-flight step
+  // back to "idle" since the actual streams are dead.
+  useEffect(() => {
+    const persisted = loadPersisted<WorkflowState>(STORAGE_KEY);
+    if (persisted) {
+      const sanitizedSteps = Object.fromEntries(
+        Object.entries(persisted.steps || {}).map(([k, v]) => [
+          k,
+          v === "running" ? "idle" : v,
+        ])
+      ) as WorkflowState["steps"];
+      setState({ ...persisted, running: false, steps: sanitizedSteps });
+    }
+    hydratedRef.current = true;
+  }, []);
+
+  // Persist every transition after hydration.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    savePersisted(STORAGE_KEY, state);
+  }, [state]);
+
+  const reset = useCallback(() => {
+    setState(initialState);
+    clearPersisted(STORAGE_KEY);
+  }, []);
 
   const generate = useCallback(async (results: PipelineResults, callId?: string | null) => {
     const ctrl = new AbortController();
