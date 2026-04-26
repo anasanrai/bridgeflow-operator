@@ -60,6 +60,9 @@ from integrations import (  # noqa: E402
     GROQ_ALLOWED_EXT,
     GROQ_MAX_BYTES,
     TranscriptionError,
+    elevenlabs_configured,
+    elevenlabs_default_voice_id,
+    elevenlabs_stream_tts,
     groq_configured,
     hold_immediate_emails_for_approval,
     hubspot_configured,
@@ -83,6 +86,7 @@ from models.schemas import (  # noqa: E402
     JarvisRequest,
     PlaybookRequest,
     TestEmailRequest,
+    TTSRequest,
     ValidateWorkflowRequest,
     WorkflowDraftRequest,
     WorkflowRefineRequest,
@@ -445,6 +449,8 @@ async def config() -> dict:
         "groq": groq_configured(),
         "hubspot": hubspot_configured(),
         "hubspot_portal_id": (os.environ.get("HUBSPOT_PORTAL_ID") or "").strip() or None,
+        "elevenlabs": elevenlabs_configured(),
+        "elevenlabs_voice_id": elevenlabs_default_voice_id() if elevenlabs_configured() else None,
         "telegram_approval_mode": telegram_configured(),
     }
 
@@ -634,6 +640,17 @@ async def jarvis(req: JarvisRequest) -> StreamingResponse:
         current_page=req.current_page,
         company_name=company_name,
     )
+    # Operator-chosen persona override — gets prepended ABOVE the
+    # canonical Jarvis system prompt so the identity / voice / tone
+    # carries through every turn.
+    if req.persona:
+        system = (
+            "PERSONALITY OVERRIDE (operator-chosen, takes precedence over the "
+            "default Jarvis persona below):\n"
+            + req.persona.strip()
+            + "\n\n---\n\n"
+            + system
+        )
 
     # Compose messages: replay history + the new turn (or a synthetic
     # "say hello" bootstrap when kind=greeting).
@@ -685,6 +702,31 @@ async def jarvis(req: JarvisRequest) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
+        },
+    )
+
+
+@app.post("/tts")
+async def tts(req: TTSRequest) -> StreamingResponse:
+    """ElevenLabs TTS proxy. Streams MP3 bytes back so the frontend can
+    play each sentence the moment ElevenLabs starts emitting audio."""
+    if not elevenlabs_configured():
+        raise HTTPException(503, "elevenlabs_not_configured")
+
+    async def gen():
+        async for chunk in elevenlabs_stream_tts(
+            req.text,
+            voice_id=req.voice_id,
+            model_id=req.model_id,
+        ):
+            yield chunk
+
+    return StreamingResponse(
+        gen(),
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
         },
     )
 

@@ -101,6 +101,18 @@ class JarvisRequest(BaseModel):
     kind: str = "user"  # "user" | "greeting"
     current_page: str | None = None
     conversation_history: list[ConsultantMessage] = Field(default_factory=list)
+    # V2 voice persona — when set, the system prompt's "You are Jarvis" line
+    # is rewritten with the operator's chosen identity. Free-form, capped to
+    # ~600 chars on validation.
+    persona: str | None = Field(default=None, max_length=600)
+
+
+class TTSRequest(BaseModel):
+    """ElevenLabs TTS proxy. Frontend fires this per-sentence as the LLM
+    streams, plays each blob in arrival-index order."""
+    text: str = Field(..., min_length=1, max_length=2000)
+    voice_id: str | None = None
+    model_id: str | None = None
 
 
 class AgentEvent(BaseModel):

@@ -22,6 +22,11 @@ from .hubspot import (
     sync_lead_to_hubspot,
     hubspot_configured,
 )
+from .elevenlabs import (
+    stream_tts as elevenlabs_stream_tts,
+    elevenlabs_configured,
+    default_voice_id as elevenlabs_default_voice_id,
+)
 
 __all__ = [
     "notify_hot_lead",
@@ -40,4 +45,7 @@ __all__ = [
     "TranscriptionError",
     "sync_lead_to_hubspot",
     "hubspot_configured",
+    "elevenlabs_stream_tts",
+    "elevenlabs_configured",
+    "elevenlabs_default_voice_id",
 ]

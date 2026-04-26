@@ -3,18 +3,23 @@
 /**
  * Jarvis — operator-side voice/text assistant overlay.
  *
- * Mounted once at the app shell so it persists across pages. Bottom-left
- * fixed avatar; tap to expand into a 380x520 chat panel. Voice in via
- * Web Speech API SpeechRecognition; voice out via SpeechSynthesis. Both
- * are 100% browser-side — no extra backend infra.
+ * Mounted once at the app shell, fixed BOTTOM-RIGHT. Click to expand
+ * into a 380x520 chat. Voice in via Web Speech API SpeechRecognition;
+ * voice out via either ElevenLabs streaming TTS (default, sounds like
+ * a real ~40s British male) or browser SpeechSynthesis (fallback when
+ * ELEVENLABS_API_KEY isn't configured server-side).
  *
- * Streaming responses come from POST /api/jarvis (SSE, mirrors the
- * /consultant pattern). Action directives like
- *   {"action":"navigate","target":"/review"}
- * embedded on their own line in the model's response are parsed and
- * executed (router.push for navigate; custom DOM events for click).
+ * Latency strategy: as Opus 4.7 streams text deltas, we detect sentence
+ * boundaries (.!?\n) and fire a /api/tts request per sentence. Audio
+ * blobs are queued and played in arrival-index order so the operator
+ * starts hearing Jarvis ~600ms after the first sentence completes,
+ * instead of waiting for the full 4-second response.
  *
- * Memory is in-session only — last 30 messages persist to localStorage
+ * Action directives like {"action":"navigate","target":"/review"}
+ * embedded on their own line are parsed and executed (router.push,
+ * custom DOM events).
+ *
+ * Memory: in-session only — last 30 messages persist to localStorage
  * so a page refresh doesn't lose context.
  */
 
@@ -27,6 +32,10 @@ import {
   IconSparkle,
   IconX,
 } from "../lib/icons";
+import {
+  resolvePersona,
+  useJarvisSettings,
+} from "../lib/jarvisSettings";
 
 interface Msg {
   id: string;
@@ -49,11 +58,12 @@ const ACTION_RE = /\{\s*"action"\s*:\s*"(navigate|click|run_demo)"(?:\s*,\s*"tar
 export function JarvisOverlay() {
   const router = useRouter();
   const pathname = usePathname();
+  const [settings] = useJarvisSettings();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [voiceOn, setVoiceOn] = useState(true);
+  const [speakingNow, setSpeakingNow] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceErr, setVoiceErr] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -61,7 +71,132 @@ export function JarvisOverlay() {
   const recognitionRef = useRef<any>(null);
   const greetedRef = useRef(false);
 
-  // ── Hydration: load stored history once on mount ─────────────────────
+  // ── Audio queue (sentence-boundary playback) ─────────────────────────
+  const audioQueueRef = useRef<Map<number, HTMLAudioElement | null>>(new Map());
+  const nextPlayIndexRef = useRef(0);
+  const enqueuedCountRef = useRef(0);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopAllAudio = useCallback(() => {
+    try {
+      currentAudioRef.current?.pause();
+      currentAudioRef.current = null;
+    } catch {
+      // ignore
+    }
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    audioQueueRef.current.clear();
+    nextPlayIndexRef.current = 0;
+    enqueuedCountRef.current = 0;
+    setSpeakingNow(false);
+  }, []);
+
+  const playNextInQueue = useCallback(() => {
+    const idx = nextPlayIndexRef.current;
+    const audio = audioQueueRef.current.get(idx);
+    if (audio === undefined) return; // not ready yet
+    if (audio === null) {
+      // fetch failed for this slot — skip and try next
+      audioQueueRef.current.delete(idx);
+      nextPlayIndexRef.current += 1;
+      playNextInQueue();
+      return;
+    }
+    currentAudioRef.current = audio;
+    setSpeakingNow(true);
+    audio.onended = () => {
+      audioQueueRef.current.delete(idx);
+      nextPlayIndexRef.current += 1;
+      currentAudioRef.current = null;
+      // If nothing else is queued and stream is done, mark idle.
+      if (
+        audioQueueRef.current.size === 0 &&
+        nextPlayIndexRef.current >= enqueuedCountRef.current
+      ) {
+        setSpeakingNow(false);
+      }
+      playNextInQueue();
+    };
+    audio.onerror = () => {
+      audioQueueRef.current.delete(idx);
+      nextPlayIndexRef.current += 1;
+      currentAudioRef.current = null;
+      playNextInQueue();
+    };
+    audio.play().catch(() => {
+      // Autoplay blocked — surface a message once.
+      audioQueueRef.current.delete(idx);
+      nextPlayIndexRef.current += 1;
+      currentAudioRef.current = null;
+      playNextInQueue();
+    });
+  }, []);
+
+  const enqueueSentenceTTS = useCallback(
+    async (sentence: string) => {
+      const trimmed = sentence.trim();
+      if (!trimmed) return;
+      if (!settings.voice_enabled) return;
+
+      // Browser provider: fall back to SpeechSynthesis (no streaming, but
+      // saves the operator from configuring ElevenLabs).
+      if (settings.provider === "browser") {
+        if (typeof window === "undefined" || !window.speechSynthesis) return;
+        try {
+          const u = new SpeechSynthesisUtterance(trimmed);
+          const voices = window.speechSynthesis.getVoices();
+          const preferred =
+            voices.find((v) =>
+              /Daniel|Samantha|Allison|Ava \(Premium\)|Google.*UK English Male/i.test(v.name)
+            ) || voices.find((v) => v.lang.startsWith("en")) || voices[0];
+          if (preferred) u.voice = preferred;
+          u.rate = 1.05;
+          u.onstart = () => setSpeakingNow(true);
+          u.onend = () => setSpeakingNow(false);
+          window.speechSynthesis.speak(u);
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+      // ElevenLabs path — fire request, queue audio at our index.
+      const myIndex = enqueuedCountRef.current;
+      enqueuedCountRef.current += 1;
+      try {
+        const resp = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: trimmed,
+            voice_id: settings.voice_id || undefined,
+          }),
+        });
+        if (!resp.ok) {
+          audioQueueRef.current.set(myIndex, null);
+          if (myIndex === nextPlayIndexRef.current) playNextInQueue();
+          return;
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.preload = "auto";
+        audioQueueRef.current.set(myIndex, audio);
+        // If this is the slot we're waiting on, kick playback.
+        if (myIndex === nextPlayIndexRef.current && !currentAudioRef.current) {
+          playNextInQueue();
+        }
+      } catch {
+        audioQueueRef.current.set(myIndex, null);
+        if (myIndex === nextPlayIndexRef.current) playNextInQueue();
+      }
+    },
+    [settings.provider, settings.voice_enabled, settings.voice_id, playNextInQueue]
+  );
+
+  // ── History hydration + persistence ─────────────────────────────────
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -74,7 +209,6 @@ export function JarvisOverlay() {
     }
   }, []);
 
-  // Persist on every change
   useEffect(() => {
     try {
       localStorage.setItem(
@@ -86,45 +220,16 @@ export function JarvisOverlay() {
     }
   }, [messages]);
 
-  // Auto-scroll to bottom while streaming
   useEffect(() => {
     if (!scrollRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, open]);
 
-  // ── Voice output (TTS) ──────────────────────────────────────────────
-  const speak = useCallback(
-    (text: string) => {
-      if (!voiceOn || typeof window === "undefined") return;
-      const synth = window.speechSynthesis;
-      if (!synth) return;
-      // Strip action JSON + markdown before speaking.
-      const clean = stripForSpeech(text);
-      if (!clean.trim()) return;
-      try {
-        synth.cancel();
-        const u = new SpeechSynthesisUtterance(clean);
-        // Pick the most natural-sounding voice available.
-        const voices = synth.getVoices();
-        const preferred =
-          voices.find((v) => /Samantha|Allison|Ava \(Premium\)|Google.*UK English Male/i.test(v.name)) ||
-          voices.find((v) => v.lang.startsWith("en")) ||
-          voices[0];
-        if (preferred) u.voice = preferred;
-        u.rate = 1.05;
-        u.pitch = 1.0;
-        synth.speak(u);
-      } catch {
-        // ignore
-      }
-    },
-    [voiceOn]
-  );
-
-  // ── Voice input (SpeechRecognition) ─────────────────────────────────
+  // ── Voice input ─────────────────────────────────────────────────────
   const startListening = useCallback(() => {
     if (typeof window === "undefined") return;
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SR =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
       setVoiceErr(
         "Voice input isn't supported in this browser. Try Chrome, Edge, or Safari."
@@ -132,6 +237,8 @@ export function JarvisOverlay() {
       return;
     }
     setVoiceErr(null);
+    // Stop any in-flight TTS so the user can interrupt cleanly.
+    stopAllAudio();
     const r = new SR();
     r.continuous = false;
     r.interimResults = true;
@@ -156,10 +263,8 @@ export function JarvisOverlay() {
     };
     r.onend = () => {
       setListening(false);
-      // Auto-send once final text is locked in
       if (finalText.trim()) {
         setInput(finalText.trim());
-        // Use requestAnimationFrame to ensure state has flushed
         requestAnimationFrame(() => sendRef.current(finalText.trim()));
       }
     };
@@ -171,7 +276,7 @@ export function JarvisOverlay() {
       setListening(false);
       setVoiceErr(`Could not start listening: ${(err as Error).message}`);
     }
-  }, []);
+  }, [stopAllAudio]);
 
   const stopListening = useCallback(() => {
     try {
@@ -182,7 +287,7 @@ export function JarvisOverlay() {
     setListening(false);
   }, []);
 
-  // ── Action directive parsing ────────────────────────────────────────
+  // ── Action directives ───────────────────────────────────────────────
   const executeAction = useCallback(
     (action: JarvisAction) => {
       if (action.action === "navigate" && action.target) {
@@ -190,7 +295,6 @@ export function JarvisOverlay() {
         return;
       }
       if (action.action === "click" && action.target) {
-        // Defer one tick so navigation lands first if a route change preceded
         setTimeout(() => {
           window.dispatchEvent(
             new CustomEvent("jarvis:click", { detail: { target: action.target } })
@@ -209,12 +313,15 @@ export function JarvisOverlay() {
     [router]
   );
 
-  // ── Send / stream a turn ────────────────────────────────────────────
+  // ── Send / stream a turn with sentence-boundary TTS ─────────────────
   const send = useCallback(
     async (content: string, opts: { kind?: "user" | "greeting" } = {}) => {
       const trimmed = (content || "").trim();
       if (opts.kind !== "greeting" && !trimmed) return;
       if (streaming) return;
+
+      // Clear any in-flight TTS audio + stream state from prior turn.
+      stopAllAudio();
 
       const placeholderId = cryptoRandomId();
       if (opts.kind !== "greeting") {
@@ -226,37 +333,58 @@ export function JarvisOverlay() {
         setMessages((prev) => [
           ...prev,
           userMsg,
-          {
-            id: placeholderId,
-            role: "assistant",
-            content: "",
-            streaming: true,
-          },
+          { id: placeholderId, role: "assistant", content: "", streaming: true },
         ]);
         setInput("");
       } else {
         setMessages((prev) => [
           ...prev,
-          {
-            id: placeholderId,
-            role: "assistant",
-            content: "",
-            streaming: true,
-          },
+          { id: placeholderId, role: "assistant", content: "", streaming: true },
         ]);
       }
       setStreaming(true);
 
       const ctrl = new AbortController();
       abortRef.current = ctrl;
+
+      // Sentence-boundary buffer — we hold text until we hit .!?\n,
+      // then strip the trailing newline/whitespace, fire TTS, and start
+      // accumulating the next sentence.
+      let pendingTtsBuffer = "";
+      const flushSentence = (force = false) => {
+        if (!settings.voice_enabled) return;
+        // Strip JSON action directives before TTS — they're not for speaking.
+        const cleaned = pendingTtsBuffer.replace(ACTION_RE, "");
+        // Match a sentence ending (. ! ? or newline) — be lenient on
+        // periods inside common abbreviations would be the next refinement.
+        const m = cleaned.match(/^([\s\S]*?[.!?\n])([\s\S]*)$/);
+        if (m) {
+          const sentence = stripForSpeech(m[1]);
+          pendingTtsBuffer = m[2];
+          if (sentence.trim().length > 1) {
+            void enqueueSentenceTTS(sentence);
+          }
+          // Recurse — multi-sentence chunks should all flush.
+          flushSentence();
+        } else if (force) {
+          // End of stream — flush whatever's left.
+          const tail = stripForSpeech(cleaned);
+          pendingTtsBuffer = "";
+          if (tail.trim().length > 1) {
+            void enqueueSentenceTTS(tail);
+          }
+        }
+      };
+
       try {
-        const r = await fetch("/api/jarvis", {
+        const resp = await fetch("/api/jarvis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: trimmed,
             kind: opts.kind ?? "user",
             current_page: pathname,
+            persona: resolvePersona(settings) || undefined,
             conversation_history: messages
               .filter((m) => !m.streaming)
               .slice(-12)
@@ -264,11 +392,11 @@ export function JarvisOverlay() {
           }),
           signal: ctrl.signal,
         });
-        if (!r.ok || !r.body) {
-          const text = await r.text().catch(() => "");
-          throw new Error(`Backend ${r.status}: ${text.slice(0, 200)}`);
+        if (!resp.ok || !resp.body) {
+          const text = await resp.text().catch(() => "");
+          throw new Error(`Backend ${resp.status}: ${text.slice(0, 200)}`);
         }
-        const reader = r.body.getReader();
+        const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
         let assembled = "";
@@ -292,6 +420,7 @@ export function JarvisOverlay() {
               const ev = JSON.parse(dataLine);
               if (ev?.type === "delta" && typeof ev.delta === "string") {
                 assembled += ev.delta;
+                pendingTtsBuffer += ev.delta;
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === placeholderId
@@ -299,6 +428,7 @@ export function JarvisOverlay() {
                       : m
                   )
                 );
+                flushSentence();
               } else if (ev?.type === "error") {
                 throw new Error(ev.message ?? "stream error");
               }
@@ -307,14 +437,14 @@ export function JarvisOverlay() {
             }
           }
         }
+        // Final flush — anything in the buffer the model didn't terminate.
+        flushSentence(true);
         setMessages((prev) =>
           prev.map((m) =>
             m.id === placeholderId ? { ...m, streaming: false } : m
           )
         );
-
-        // Speak + execute actions once stream is fully assembled
-        if (voiceOn) speak(assembled);
+        // Execute any embedded action directive.
         const action = parseAction(assembled);
         if (action) executeAction(action);
       } catch (err) {
@@ -335,10 +465,18 @@ export function JarvisOverlay() {
         abortRef.current = null;
       }
     },
-    [messages, pathname, streaming, voiceOn, speak, executeAction]
+    [
+      messages,
+      pathname,
+      streaming,
+      settings,
+      executeAction,
+      enqueueSentenceTTS,
+      stopAllAudio,
+    ]
   );
 
-  // Latest send ref so the recognizer's onend can call it without stale closure
+  // Latest send ref — recognizer's onend can't capture latest send via closure
   const sendRef = useRef(send);
   useEffect(() => {
     sendRef.current = send;
@@ -362,7 +500,6 @@ export function JarvisOverlay() {
       // ignore
     }
     setOpen(true);
-    // Delay slightly so the panel mount-anim doesn't fight the SSE start
     const t = setTimeout(() => {
       void send("", { kind: "greeting" });
     }, 600);
@@ -372,6 +509,7 @@ export function JarvisOverlay() {
 
   const reset = () => {
     abortRef.current?.abort();
+    stopAllAudio();
     setMessages([]);
     setInput("");
     setStreaming(false);
@@ -395,7 +533,7 @@ export function JarvisOverlay() {
   );
 
   return (
-    <div className="fixed bottom-4 left-4 z-[60] pointer-events-none">
+    <div className="fixed bottom-4 right-4 z-[60] pointer-events-none">
       <div className="pointer-events-auto">
         {open ? (
           <JarvisPanel
@@ -404,8 +542,7 @@ export function JarvisOverlay() {
             setInput={setInput}
             send={() => void send(input)}
             streaming={streaming}
-            voiceOn={voiceOn}
-            setVoiceOn={setVoiceOn}
+            speakingNow={speakingNow}
             listening={listening}
             startListening={startListening}
             stopListening={stopListening}
@@ -414,10 +551,14 @@ export function JarvisOverlay() {
             onClose={() => setOpen(false)}
             onReset={reset}
             onKeyDown={onKeyDown}
+            providerLabel={
+              settings.provider === "elevenlabs" ? "elevenlabs · daniel" : "browser tts"
+            }
           />
         ) : (
           <JarvisFab
             streaming={streaming}
+            speakingNow={speakingNow}
             listening={listening}
             onOpen={() => setOpen(true)}
           />
@@ -431,10 +572,12 @@ export function JarvisOverlay() {
 
 function JarvisFab({
   streaming,
+  speakingNow,
   listening,
   onOpen,
 }: {
   streaming: boolean;
+  speakingNow: boolean;
   listening: boolean;
   onOpen: () => void;
 }) {
@@ -450,14 +593,22 @@ function JarvisFab({
         className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-bg ${
           listening
             ? "bg-hot animate-blink"
+            : speakingNow
+            ? "bg-accent animate-blink shadow-glow-accent"
             : streaming
             ? "bg-warm animate-blink"
             : "bg-accent shadow-glow-accent"
         }`}
       />
-      <span className="absolute -inset-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="absolute inset-0 rounded-full bg-accent/15 animate-ping" />
-      </span>
+      {(speakingNow || listening) && (
+        <span className="absolute inset-0 rounded-full pointer-events-none">
+          <span
+            className={`absolute inset-0 rounded-full ${
+              listening ? "bg-hot/30" : "bg-accent/30"
+            } animate-ping`}
+          />
+        </span>
+      )}
     </button>
   );
 }
@@ -470,8 +621,7 @@ function JarvisPanel({
   setInput,
   send,
   streaming,
-  voiceOn,
-  setVoiceOn,
+  speakingNow,
   listening,
   startListening,
   stopListening,
@@ -480,14 +630,14 @@ function JarvisPanel({
   onClose,
   onReset,
   onKeyDown,
+  providerLabel,
 }: {
   messages: Msg[];
   input: string;
   setInput: (v: string) => void;
   send: () => void;
   streaming: boolean;
-  voiceOn: boolean;
-  setVoiceOn: (v: boolean) => void;
+  speakingNow: boolean;
   listening: boolean;
   startListening: () => void;
   stopListening: () => void;
@@ -496,6 +646,7 @@ function JarvisPanel({
   onClose: () => void;
   onReset: () => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  providerLabel: string;
 }) {
   return (
     <section
@@ -507,40 +658,44 @@ function JarvisPanel({
         <div className="flex items-center gap-2 min-w-0">
           <div
             className={`relative w-8 h-8 rounded-full bg-accent/15 border border-accent/40 text-accent flex items-center justify-center ${
-              streaming ? "shadow-glow-accent" : ""
+              speakingNow || streaming ? "shadow-glow-accent" : ""
             }`}
           >
             <IconLogo className="w-4 h-4" />
-            {(streaming || listening) && (
+            {(speakingNow || listening) && (
               <span className="absolute inset-0 rounded-full">
-                <span className={`absolute inset-0 rounded-full ${listening ? "bg-hot/30" : "bg-accent/30"} animate-ping`} />
+                <span
+                  className={`absolute inset-0 rounded-full ${
+                    listening ? "bg-hot/30" : "bg-accent/30"
+                  } animate-ping`}
+                />
               </span>
             )}
           </div>
           <div className="min-w-0">
-            <div className="text-[13px] font-semibold text-ink leading-tight">Jarvis</div>
-            <div className="text-[10px] font-mono uppercase tracking-wider text-faint leading-tight">
+            <div className="text-[13px] font-semibold text-ink leading-tight">
+              Jarvis
+            </div>
+            <div className="text-[10px] font-mono uppercase tracking-wider text-faint leading-tight truncate">
               {listening
                 ? "listening…"
+                : speakingNow
+                ? "speaking…"
                 : streaming
                 ? "thinking…"
-                : "claude opus 4.7"}
+                : providerLabel}
             </div>
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => setVoiceOn(!voiceOn)}
-            title={voiceOn ? "Mute voice output" : "Unmute voice output"}
-            aria-label="Toggle voice"
-            className={`w-7 h-7 rounded-md border flex items-center justify-center cursor-pointer transition-colors ${
-              voiceOn
-                ? "border-accent/40 text-accent bg-accent/10"
-                : "border-border text-muted bg-bg hover:text-ink hover:bg-surface-2"
-            }`}
+          <a
+            href="/settings/ai"
+            title="Voice + persona settings"
+            aria-label="Jarvis settings"
+            className="w-7 h-7 rounded-md border border-border text-muted hover:text-ink hover:bg-surface-2 flex items-center justify-center cursor-pointer transition-colors"
           >
-            <SpeakerGlyph muted={!voiceOn} />
-          </button>
+            <IconSparkle className="w-3.5 h-3.5" />
+          </a>
           <button
             onClick={onReset}
             title="Reset conversation"
@@ -690,16 +845,14 @@ function stripActionJson(text: string): string {
 }
 
 function stripForSpeech(text: string): string {
-  // For TTS — strip action JSON, markdown markers, code fences. Keep
-  // sentence rhythm so the voice sounds natural.
   let out = stripActionJson(text);
-  out = out.replace(/```[\s\S]*?```/g, "");        // code fences
-  out = out.replace(/`([^`]+)`/g, "$1");            // inline code
-  out = out.replace(/\*\*([^*]+)\*\*/g, "$1");      // bold
-  out = out.replace(/\*([^*]+)\*/g, "$1");          // italic
-  out = out.replace(/^#{1,6}\s+/gm, "");            // headings
-  out = out.replace(/^[-*]\s+/gm, "");              // bullets
-  out = out.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1"); // links
+  out = out.replace(/```[\s\S]*?```/g, "");
+  out = out.replace(/`([^`]+)`/g, "$1");
+  out = out.replace(/\*\*([^*]+)\*\*/g, "$1");
+  out = out.replace(/\*([^*]+)\*/g, "$1");
+  out = out.replace(/^#{1,6}\s+/gm, "");
+  out = out.replace(/^[-*]\s+/gm, "");
+  out = out.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
   return out;
 }
 
@@ -712,28 +865,18 @@ function cryptoRandomId(): string {
 
 // ── Inline glyphs ────────────────────────────────────────────────────
 
-function SpeakerGlyph({ muted = false }: { muted?: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M11 5L6 9H2v6h4l5 4V5z" />
-      {muted ? (
-        <>
-          <path d="M22 9l-6 6" />
-          <path d="M16 9l6 6" />
-        </>
-      ) : (
-        <>
-          <path d="M16 9a4 4 0 0 1 0 6" />
-          <path d="M19 6a8 8 0 0 1 0 12" />
-        </>
-      )}
-    </svg>
-  );
-}
-
 function MicGlyph() {
   return (
-    <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      className="w-4 h-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
       <rect x="9" y="3" width="6" height="11" rx="3" />
       <path d="M5 11a7 7 0 0 0 14 0" />
       <path d="M12 18v3" />
@@ -745,9 +888,18 @@ function MicGlyph() {
 function DotsTyping() {
   return (
     <span className="inline-flex items-center gap-1 text-faint">
-      <span className="w-1.5 h-1.5 rounded-full bg-current animate-blink" style={{ animationDelay: "0ms" }} />
-      <span className="w-1.5 h-1.5 rounded-full bg-current animate-blink" style={{ animationDelay: "120ms" }} />
-      <span className="w-1.5 h-1.5 rounded-full bg-current animate-blink" style={{ animationDelay: "240ms" }} />
+      <span
+        className="w-1.5 h-1.5 rounded-full bg-current animate-blink"
+        style={{ animationDelay: "0ms" }}
+      />
+      <span
+        className="w-1.5 h-1.5 rounded-full bg-current animate-blink"
+        style={{ animationDelay: "120ms" }}
+      />
+      <span
+        className="w-1.5 h-1.5 rounded-full bg-current animate-blink"
+        style={{ animationDelay: "240ms" }}
+      />
     </span>
   );
 }

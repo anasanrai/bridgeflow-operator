@@ -183,6 +183,26 @@ export function Sidebar() {
             <CompletenessDot value={completeness} />
           </Link>
           <Link
+            href="/settings/ai"
+            className={`group flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-colors cursor-pointer ${
+              isActive(pathname, "/settings/ai")
+                ? "bg-white/[0.04] text-ink"
+                : "text-ink-muted hover:text-ink hover:bg-white/[0.03]"
+            }`}
+          >
+            <IconLogo
+              className={`w-4 h-4 transition-colors ${
+                isActive(pathname, "/settings/ai")
+                  ? "text-accent"
+                  : "text-muted group-hover:text-ink"
+              }`}
+            />
+            <span className="flex-1 text-left">Jarvis</span>
+            <span className="text-[9px] font-mono uppercase tracking-wider px-1 py-0.5 rounded border border-accent/35 text-accent bg-accent/10">
+              new
+            </span>
+          </Link>
+          <Link
             href="/settings/credentials"
             className={`group flex items-center gap-3 px-2.5 py-2 rounded-md text-sm transition-colors cursor-pointer ${
               isActive(pathname, "/settings/credentials")
