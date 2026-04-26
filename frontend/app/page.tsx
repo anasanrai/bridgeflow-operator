@@ -22,7 +22,10 @@ export default function LandingPage() {
       <BackdropGlow />
 
       <div className="relative max-w-5xl mx-auto">
-        <Hackathon />
+        <div className="flex flex-wrap items-center gap-2">
+          <Hackathon />
+          <CreditUsage />
+        </div>
 
         <h1 className="mt-7 text-[40px] sm:text-[56px] lg:text-[72px] leading-[0.98] font-semibold tracking-tight text-ink">
           Drop a sales call.
@@ -89,6 +92,43 @@ function Hackathon() {
       <span className="w-1.5 h-1.5 rounded-full bg-accent shadow-glow-accent animate-blink" />
       Built with Opus 4.7 · A Claude Code hackathon
       <IconChevron className="w-3 h-3 opacity-60 group-hover:translate-x-0.5 transition-transform" />
+    </a>
+  );
+}
+
+// ── Credit usage badge ─────────────────────────────────────────────────
+// Anthropic gave each team $500 in API credits. We burned $425.21 in 5
+// days across all 5 agents + Jarvis + the workflow generator. Displaying
+// it here so judges can verify "real product" vs "sketch" without having
+// to open the README. Source: Anthropic console → API keys → Cost.
+
+function CreditUsage() {
+  const SPENT = 425.21;
+  const BUDGET = 500;
+  const pct = Math.round((SPENT / BUDGET) * 100);
+  return (
+    <a
+      href="https://github.com/anasanrai/bridgeflow-operator#-hackathon-credit-usage"
+      target="_blank"
+      rel="noreferrer"
+      title={`$${SPENT} of $${BUDGET} hackathon credit spent · ${pct}% — receipts in README`}
+      className="group inline-flex items-center gap-2 rounded-full border border-amber-500/45 bg-amber-500/[0.06] px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider text-amber-200 hover:bg-amber-500/[0.10] transition-colors"
+    >
+      <span className="font-semibold">${SPENT.toFixed(2)} / ${BUDGET}</span>
+      <span className="opacity-70">·</span>
+      <span>credit spent</span>
+      <span className="ml-1 inline-flex items-center gap-1">
+        <span
+          className="relative w-10 h-1 rounded-full bg-amber-500/15 overflow-hidden"
+          aria-hidden
+        >
+          <span
+            className="absolute inset-y-0 left-0 bg-amber-300/90"
+            style={{ width: `${pct}%` }}
+          />
+        </span>
+        <span className="text-amber-300 font-semibold">{pct}%</span>
+      </span>
     </a>
   );
 }
