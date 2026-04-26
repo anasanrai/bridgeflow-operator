@@ -30,7 +30,7 @@ export default function PipelinePage() {
   const score = leadScore(pipeline.results);
   const workflowEligible = score === "HOT" || score === "WARM";
 
-  // When a pipeline run finishes with HOT/WARM, surface the V2 tab.
+  // When a pipeline run finishes with HOT/WARM, surface the workflow tab.
   useEffect(() => {
     if (pipeline.results && workflowEligible) setMode("workflow");
   }, [pipeline.results, workflowEligible]);
@@ -140,6 +140,8 @@ function ModeTabs({
       label: "Workflow",
       icon: IconSparkle,
       available: workflowEligible,
+      // When gated, show the rule on the tab so it's not just a dim button.
+      badge: workflowEligible ? undefined : "HOT / WARM only",
     },
   ];
 
